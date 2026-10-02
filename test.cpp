@@ -1,8 +1,13 @@
 #include <Windows.h>
+#include <stdio.h>
 
-void foo(void) // Function definition signature or prototype
+// Function definition
+void foo(void)
 {
-	OutputDebugStringA("Hello World\n");
+	const char* Foo = "This is the first thing we have actually printed.\n";
+	OutputDebugStringA(
+		"Line 0\\Line 1\n");
+	printf("djwjdiwjiefjifjrfreifjirjferif\n");
 }
 
 int CALLBACK WinMain(
@@ -11,6 +16,7 @@ int CALLBACK WinMain(
 	LPSTR lpCmdLine, 
 	int nCmdShow)
 {
+	/*
 	char SmallS; // 00000000 slots for 1 and 0, 8 bits, 1 byte
 	// thus, char being an 8bit type, we have 2^8 (256) possible values (-128 - +127)
 
@@ -20,6 +26,17 @@ int CALLBACK WinMain(
 	
 	int LargeS; // 32 bits 4 bytes - ~4 billion values
 
+
+	*/
+
+
+
+	char unsigned Test;
+	char unsigned* TestPointer = &Test;
+
+
+	Test = 255;
+	Test = Test + 1;
 	foo();
 	return 0;
 }
