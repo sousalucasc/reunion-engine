@@ -39,22 +39,80 @@ int CALLBACK WinMain(
 
 	*/
 
-	projectile Test;
-
-	int SizeOfChar = sizeof(char unsigned);
-	int SizeOfInt = sizeof(int);
-	int SizeOfProjectile = sizeof(projectile);
-	int SizeOfTest = sizeof(Test);
-
-	
-	
-	Test.isThisOnFire = 1;
-	Test.Damage = 1;
-	Test.ParticlesPerSecond = 1;
-	Test.HowManyCooks = 1;
+	int x = 5;
+	int y = 10;
+	x = (1 << 4) | (1 << 8);   
+	y = (1 << 8) | (1 << 16);  
+	x = x&y;  
 	
 	return 0;
 	}
+// DAY 6
+
+
+
+
+// DAY 5
+
+
+// Code lives in the executable file, the code is encoded in a format that is defined by intel and amd
+// Decoded in binary telling what instructions the CPU needs to use, in order
+// 
+// CODE -> OBJ'S -> EXE
+// CODING -> COMPILING -> LINKING
+// basically the code we write turns into an obj file, that will be linked to other obj libs
+// and everything will be a executable file	
+
+// there will be always some linking needed to do outside of the code, because our program
+// will run inside windows, and they are not windows itself!
+
+// SUPPOSE WE HAVE A CODE MEMORY BLOCK:
+// XXXXXXXXLLLXXXXXXLLLXXXXXXXXLLXXXXXXXXXXXXXXXXXXXXLL
+// the X would be our program itself, the L would be pointers to our actual windows code!
+
+// # OPERATORS
+// just like in math
+// int x;int y;int z = x*y + y*3 - 3/y
+
+// # BITWISE OPERATORS
+// int x = 0x0000000a (10)
+// x = x << 4 (0x000000a0) (160)
+// x = x >> 4 (0x0000000a) (10)
+
+// # ADVANCED BITWISE OPERATORS
+//
+// int x = 0;         (0x00000000)
+// x = x | (1 << 4);  (0x00000010)
+// x = x | (1 << 8);  (0x00000110)
+// x = x & (1 << 4);  (0x00000010)
+// 
+// | - LIGA BITS
+// & - FILTRA
+// 
+// NEGATION
+// int x = 0x00110110
+// x = ~x (x would be 0xffeefeef)
+// TURNS INTO OPPOSITE
+// 
+// 
+// int x = 5;
+// int y = 10;
+//
+//  EXCLUSIVE OR
+// x = (1 << 4) | (1 << 8);   (0x00000110)
+// y = (1 << 8) | (1 << 16);  (0x00010100)
+// x = x^y;                   (0x00010010)  remove the bitset both have
+// 
+// OR
+// x = (1 << 4) | (1 << 8);   (0x00000110)
+// y = (1 << 8) | (1 << 16);  (0x00010100)
+// x = x&y;                   (0x00000100) just leaves the bitset both have
+
+
+
+
+// DAY 4
+
 
 // learned endianess, how values are represented in the block of memory
 // 500 as unsigned short is represented as 244 and 1 (each number for each byte, since short are 2 bytes)
@@ -63,6 +121,7 @@ int CALLBACK WinMain(
 // needed 11 bytes. but it reserved 16, 4 bytes for every variable
 
 // learned hexadecimal
+// THE ONLY REASON TO USE HEXADECIMAL IS: IT ALIGNS PERFECTLY WITH BINARY	
 // 0xA = 10
 // 0xAA = 16*10 + 10 = 170
 // 0xAAA = 16*16*10 + 16*10 + 10 = 2730
