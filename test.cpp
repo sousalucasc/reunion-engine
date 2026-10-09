@@ -107,6 +107,10 @@ int CALLBACK WinMain(
 // x = (1 << 4) | (1 << 8);   (0x00000110)
 // y = (1 << 8) | (1 << 16);  (0x00010100)
 // x = x&y;                   (0x00000100) just leaves the bitset both have
+//
+// # BOOLEANS (LOGICAL OPERATORS)
+// anything that isnt a 0 is true, as simple as that.
+//
 
 
 
