@@ -111,7 +111,8 @@ int CALLBACK WinMain(
 // # BOOLEANS (LOGICAL OPERATORS)
 // anything that isnt a 0 is true, as simple as that.
 //
-
+// Q&A
+//
 
 
 
