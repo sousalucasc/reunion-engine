@@ -2,7 +2,15 @@
 
 where cl >nul 2>nul && goto build
 
-for /f "usebackq delims=" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvarsall.bat" x64
+for %%E in (Community Professional Enterprise BuildTools) do (
+    if exist "%ProgramFiles%\Microsoft Visual Studio\2022\%%E\VC\Auxiliary\Build\vcvarsall.bat" (
+        call "%ProgramFiles%\Microsoft Visual Studio\2022\%%E\VC\Auxiliary\Build\vcvarsall.bat" x64
+        goto build
+    )
+)
+
+echo Visual Studio 2022 C++ tools not found.
+exit /b 1
 
 :build
 if not exist ..\build mkdir ..\build
