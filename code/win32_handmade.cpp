@@ -15,3 +15,7 @@ WinMain(HINSTANCE hInstance,
     MessageBoxA (0, "This is Handmade Hero.", "Handmade Hero", MB_OK | MB_ICONINFORMATION);
     return 0;
 }
+
+// DAY 1
+
+// learned how to create a simple message box in windows
