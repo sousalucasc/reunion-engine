@@ -9,12 +9,29 @@ global_variable bool Running;
 // DEVICE INDEPENDENT BITMAP
 internal_function void Win32ResizeDIBSection(int Width, int Height)
 {
-    
+    BITMAPINFO BitmapInfo;
+    BitmapInfo.bmiHeader.biSize = sizeof(BitmapInfo.bmiHeader);
+    BitmapInfo.biWidth = 
+
+    void *BitmapMemory;
+    HBITMAP BitmapHandle = CreateDIBSection(
+          DeviceContext,&BitmapInfo,
+          DIB_RGB_COLORS,
+          &BitmapMemory, 0,0,
+    );
 }
 
-internal_function void Win32UpdateWindow(HWND Window, int X,int Y, int Width, int Height)
+internal_function void Win32UpdateWindow(HDC DeviceContext, int X,int Y, int Width, int Height)
 {
-
+    // rectangle to rectangle copy
+    StretchDIBits(DeviceContext,
+                  X, Y, Width, Height, // Window that we are drawing to
+                  X, Y, Width, Height, // Buffer that we will draw (the same for now) 
+                  const VOID * lpBits,
+                  const BITMAPINFO * lpbmi,
+                  DIB_RGB_COLORS, // rgb color table (3 8bit colors)
+                  SRCCOPY, // copy the source retangle to the destination rectangle 
+    );
 }
 
 
@@ -56,7 +73,7 @@ Win32MainWindowCallback(HWND Window, UINT Message, WPARAM WParam, LPARAM LParam)
             int Width = Paint.rcPaint.right - Paint.rcPaint.left;
             int Height = Paint.rcPaint.bottom - Paint.rcPaint.top; // takes the exact area by subtracting the rectangles
 
-            Win32UpdateWindow(Window, X, Y, Width, Height);
+            Win32UpdateWindow(DeviceContext, X, Y, Width, Height);
 
             EndPaint(Window, &Paint);
         }break;
