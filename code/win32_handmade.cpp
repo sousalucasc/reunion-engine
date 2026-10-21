@@ -4,124 +4,127 @@
 #define local_persist static
 #define global_variable static
 
-global_variable bool Running;
+//TODO: remove al globals
 
-// DEVICE INDEPENDENT BITMAP
+global_variable bool Running; // global variable turned on or off if our program is running
+
+global_variable BITMAPINFO BitmapInfo; // the request
+global_variable void* BitmapMemory; // the memory (pixels themselves)
+global_variable HBITMAP BitmapHandle; // windows handle
+global_variable HDC BitmapDeviceContext; // draws to a bitmap
+
 internal_function void Win32ResizeDIBSection(int Width, int Height)
 {
-    BITMAPINFO BitmapInfo;
+    if (BitmapHandle)
+    {
+        DeleteObject(BitmapHandle); // Delete the old bitmap if there is one
+    }
+
+    if (!BitmapDeviceContext)
+    {
+        BitmapDeviceContext = CreateCompatibleDC(0); // make sure a memory DC exists
+    }
+
     BitmapInfo.bmiHeader.biSize = sizeof(BitmapInfo.bmiHeader);
-    BitmapInfo.biWidth = 
+    BitmapInfo.bmiHeader.biWidth = Width;
+    BitmapInfo.bmiHeader.biHeight = Height;
+    BitmapInfo.bmiHeader.biPlanes = 1;
+    BitmapInfo.bmiHeader.biBitCount = 32;
+    BitmapInfo.bmiHeader.biCompression = BI_RGB;
 
-    void *BitmapMemory;
-    HBITMAP BitmapHandle = CreateDIBSection(
-          DeviceContext,&BitmapInfo,
-          DIB_RGB_COLORS,
-          &BitmapMemory, 0,0,
-    );
+    BitmapHandle = CreateDIBSection(
+        BitmapDeviceContext, &BitmapInfo,
+        DIB_RGB_COLORS,
+        &BitmapMemory,
+        0, 0);
 }
 
-internal_function void Win32UpdateWindow(HDC DeviceContext, int X,int Y, int Width, int Height)
+internal_function void Win32UpdateWindow(HDC DeviceContext, int X, int Y, int Width, int Height)
 {
-    // rectangle to rectangle copy
     StretchDIBits(DeviceContext,
-                  X, Y, Width, Height, // Window that we are drawing to
-                  X, Y, Width, Height, // Buffer that we will draw (the same for now) 
-                  const VOID * lpBits,
-                  const BITMAPINFO * lpbmi,
-                  DIB_RGB_COLORS, // rgb color table (3 8bit colors)
-                  SRCCOPY, // copy the source retangle to the destination rectangle 
-    );
+        X, Y, Width, Height,
+        X, Y, Width, Height,
+        BitmapMemory,
+        &BitmapInfo,
+        DIB_RGB_COLORS, SRCCOPY);
 }
 
-
-LRESULT CALLBACK // LRESULT is a long ptr return type
-Win32MainWindowCallback(HWND Window, UINT Message, WPARAM WParam, LPARAM LParam) // Which window, What event happened (window,message)
+LRESULT CALLBACK
+Win32MainWindowCallback(HWND Window, UINT Message, WPARAM WParam, LPARAM LParam) // windows call each message, we can define the behavior for each as well
 {
-    LRESULT Result = 0; 
+    LRESULT Result = 0;
     switch (Message) {
-        // if the user resizes the window
-        case WM_SIZE:{
-            RECT ClientRect;
-            GetClientRect(Window, &ClientRect);
-            int Width = ClientRect.right - ClientRect.left;
-            int Height = ClientRect.bottom - ClientRect.top;
-            Win32ResizeDIBSection(Width, Height);
-            OutputDebugStringA("WM_SIZE\n");
-        } break;
-        // when windows deletes our window
-        case WM_DESTROY:{
-            Running = false;
-            OutputDebugStringA("WM_DESTROY\n");
-        }break;
-        // when the user clicks on the X on the window or alt f4
-        case WM_CLOSE:{
-            Running = false;
-            OutputDebugStringA("WM_CLOSE\n");
-        }break;
-        // when the user clicks in us (window as active)
-        case WM_ACTIVATEAPP:{
-            OutputDebugStringA("WM_ACTIVATEAPP\n");
-        }break;
-        // when windows decided that the window need to be repainted
-        case WM_PAINT:{
-            PAINTSTRUCT Paint; // struct containing information about repainting
-            HDC DeviceContext = BeginPaint(Window, &Paint); 
+    case WM_SIZE: {  // if our window change size, it reads the new drawable area, and rebuilds our pixel buffer
+        RECT ClientRect;
+        GetClientRect(Window, &ClientRect);
+        int Width = ClientRect.right - ClientRect.left;
+        int Height = ClientRect.bottom - ClientRect.top;
+        Win32ResizeDIBSection(Width, Height); // resize buffer function
+        OutputDebugStringA("WM_SIZE\n");
+    }break;
+    case WM_DESTROY: {
+        Running = false;
+        OutputDebugStringA("WM_DESTROY\n");
+    }break;
+    case WM_CLOSE: {
+        Running = false;
+        OutputDebugStringA("WM_CLOSE\n");
+    }break;
+    case WM_ACTIVATEAPP: {
+        OutputDebugStringA("WM_ACTIVATEAPP\n");
+    }break;
+    case WM_PAINT: { // if our window needs to be redrawed this runs, basically showing the buffer on WM_SIZE
+        PAINTSTRUCT Paint;
+        HDC DeviceContext = BeginPaint(Window, &Paint);
 
-            int X = Paint.rcPaint.left;
-            int Y = Paint.rcPaint.top; // stores the values of the actual retangle
-            int Width = Paint.rcPaint.right - Paint.rcPaint.left;
-            int Height = Paint.rcPaint.bottom - Paint.rcPaint.top; // takes the exact area by subtracting the rectangles
+        int X = Paint.rcPaint.left;
+        int Y = Paint.rcPaint.top;
+        int Width = Paint.rcPaint.right - Paint.rcPaint.left;
+        int Height = Paint.rcPaint.bottom - Paint.rcPaint.top;
 
-            Win32UpdateWindow(DeviceContext, X, Y, Width, Height);
+        Win32UpdateWindow(DeviceContext, X, Y, Width, Height);
 
-            EndPaint(Window, &Paint);
-        }break;
-        // if none of this conditions run
-        default:{
-            //OutputDebugStringA("default\n")
-            Result = DefWindowProc(Window,Message,WParam,LParam);
-        }break;
+        EndPaint(Window, &Paint);
+    }break;
+    default: {
+        Result = DefWindowProc(Window, Message, WParam, LParam);
+    }break;
     }
     return Result;
 }
 
-
-int CALLBACK 
+int CALLBACK                            // MAIN FUNCTION
 WinMain(HINSTANCE Instance,
     HINSTANCE PrevInstance,
     LPSTR CommandLine,
     int ShowCode)
 {
-    WNDCLASS WindowClass{}; // initializes the WNDCLASS struct, with all default values to zero
+    WNDCLASS WindowClass{}; // creating a windowclass struct
 
-    //WindowClass.style = CS_OWNDC | CS_HREDRAW | CS_VREDRAW; // Allocates unique device context for each window in the class, and it redraws while resizing
-    WindowClass.lpfnWndProc = Win32MainWindowCallback; // IMPORTANT!, assigns the return value of the callback functions to windowclass!
-    WindowClass.hInstance = Instance;
-    // WindowClass.hIcon;
-    WindowClass.lpszClassName = L"HandnameHeroWindowClass";
+    WindowClass.lpfnWndProc = Win32MainWindowCallback; // who deals with the events, windows itself calls this function for messages
+    WindowClass.hInstance = Instance; 
+    WindowClass.lpszClassName = L"HandnameHeroWindowClass"; 
 
-    if (RegisterClass(&WindowClass))
+    if (RegisterClass(&WindowClass)) // IF the registered windowclass doesnt fail
     {
-        HWND WindowHandle = CreateWindowEx(
-            0,                               // parameters for misc, drag & drop, etc etc
-            WindowClass.lpszClassName,       // actual window class
-            L"Handmade Hero",                // actual window name
-            WS_OVERLAPPEDWINDOW | WS_VISIBLE,// The window is an overlapped window (its also an aggregate to a bunch of other values but this one fits perfectly), And its visible
-            CW_USEDEFAULT,  // X pos             
-            CW_USEDEFAULT,  // Y pos
-            CW_USEDEFAULT,  // width
-            CW_USEDEFAULT,  // heigth
-            0, // parent windows (none)
-            0, // menu (none)
-            Instance, // my hInstance
-            0 // lpParam
-            );
-        // if the function fails, it will return a null value, so we check its condition
-        if (WindowHandle) 
+        HWND WindowHandle = CreateWindowEx( // we create a window 
+            0,
+            WindowClass.lpszClassName,
+            L"Handmade Hero",
+            WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            0,
+            0,
+            Instance,
+            0
+        );
+        if (WindowHandle) // IF the windowhandle doesnt return fail
         {
-            Running = true;
-            while(Running)
+            Running = true; 
+            while (Running) // we start our main messages loop
             {
                 MSG Message;
                 BOOL MessageResult = GetMessage(&Message, 0, 0, 0);
@@ -138,15 +141,11 @@ WinMain(HINSTANCE Instance,
         }
         else
         {
-            //TODO logging
         }
     }
-    else 
+    else
     {
-        //TODO logging
     }
-
 
     return 0;
 }
-
