@@ -149,3 +149,6 @@ WinMain(HINSTANCE Instance,
 
     return 0;
 }
+
+
+// for day 4 - animate backbuffer
