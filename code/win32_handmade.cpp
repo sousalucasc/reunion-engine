@@ -10,40 +10,39 @@ global_variable bool Running; // global variable turned on or off if our program
 
 global_variable BITMAPINFO BitmapInfo; // the request
 global_variable void* BitmapMemory; // the memory (pixels themselves)
-global_variable HBITMAP BitmapHandle; // windows handle
-global_variable HDC BitmapDeviceContext; // draws to a bitmap
+global_variable int BitmapWidth;
+global_variable int BitmapHeight;
 
 internal_function void Win32ResizeDIBSection(int Width, int Height)
 {
-    if (BitmapHandle)
+    if (BitmapMemory)
     {
-        DeleteObject(BitmapHandle); // Delete the old bitmap if there is one
+        VirtualFree(BitmapMemory,0,MEM_RELEASE);
     }
 
-    if (!BitmapDeviceContext)
-    {
-        BitmapDeviceContext = CreateCompatibleDC(0); // make sure a memory DC exists
-    }
+    BitmapWidth = Width;
+    BitmapHeight = Height;
 
     BitmapInfo.bmiHeader.biSize = sizeof(BitmapInfo.bmiHeader);
-    BitmapInfo.bmiHeader.biWidth = Width;
-    BitmapInfo.bmiHeader.biHeight = Height;
+    BitmapInfo.bmiHeader.biWidth = BitmapWidth;
+    BitmapInfo.bmiHeader.biHeight = BitmapHeight;
     BitmapInfo.bmiHeader.biPlanes = 1;
     BitmapInfo.bmiHeader.biBitCount = 32;
     BitmapInfo.bmiHeader.biCompression = BI_RGB;
 
-    BitmapHandle = CreateDIBSection(
-        BitmapDeviceContext, &BitmapInfo,
-        DIB_RGB_COLORS,
-        &BitmapMemory,
-        0, 0);
+    int BytesPerPixel = 4;
+    int BitmapMemorySize = BitmapWidth * BitmapHeight * BytesPerPixel;
+    BitmapMemory = VirtualAlloc(0,BitmapMemorySize,MEM_COMMIT,PAGE_READWRITE);
 }
 
-internal_function void Win32UpdateWindow(HDC DeviceContext, int X, int Y, int Width, int Height)
+internal_function void Win32UpdateWindow(HDC DeviceContext,RECT *WindowRect, int X, int Y, int Width, int Height)
 {
+    int WindowWidth = WindowRect->right - WindowRect->left;
+    int WindowHeight = WindowRect->bottom - WindowRect->top;
+
     StretchDIBits(DeviceContext,
-        X, Y, Width, Height,
-        X, Y, Width, Height,
+        0, 0, BitmapWidth, BitmapHeight,
+        X, Y, WindowWidth, WindowHeight,
         BitmapMemory,
         &BitmapInfo,
         DIB_RGB_COLORS, SRCCOPY);
@@ -151,4 +150,4 @@ WinMain(HINSTANCE Instance,
 }
 
 
-// for day 4 - animate backbuffer
+// for day 4 - animate backbuffer 
