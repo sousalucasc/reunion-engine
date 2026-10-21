@@ -1,8 +1,19 @@
 #include <windows.h>
+#include <stdint.h>
 
 #define internal_function static
 #define local_persist static
 #define global_variable static
+
+typedef uint8_t uint8;
+typedef uint16_t uint16;
+typedef uint32_t uint32;
+typedef uint64_t uint64;
+
+typedef int8_t int8;
+typedef int16_t int16;
+typedef int32_t int32;
+typedef int64_t int64;
 
 //TODO: remove al globals
 
@@ -12,6 +23,37 @@ global_variable BITMAPINFO BitmapInfo; // the request
 global_variable void* BitmapMemory; // the memory (pixels themselves)
 global_variable int BitmapWidth;
 global_variable int BitmapHeight;
+global_variable int BytesPerPixel = 4;
+
+internal_function void RenderWeirdGradient(int XOffset, int YOffset)
+{
+    int Width = BitmapWidth;
+    int Height = BitmapHeight;
+    int Pitch = Width * BytesPerPixel;
+    uint8* Row = (uint8*)BitmapMemory;
+
+    for (int Y = 0; Y < BitmapHeight; ++Y)
+    {
+        uint8* Pixel = (uint8*)Row;
+        for (int X = 0; X < BitmapWidth; ++X)
+        {
+            //blue channel
+            *Pixel = (uint8)(X + XOffset);
+            ++Pixel;
+            //green channel
+            *Pixel = (uint8)(Y + YOffset);
+            ++Pixel;
+            //red channel
+            *Pixel = 0;
+            ++Pixel;
+            //padding byte
+            *Pixel = 0;
+            ++Pixel;
+        }
+
+        Row += Pitch;
+    }
+}
 
 internal_function void Win32ResizeDIBSection(int Width, int Height)
 {
@@ -33,12 +75,14 @@ internal_function void Win32ResizeDIBSection(int Width, int Height)
     int BytesPerPixel = 4;
     int BitmapMemorySize = BitmapWidth * BitmapHeight * BytesPerPixel;
     BitmapMemory = VirtualAlloc(0,BitmapMemorySize,MEM_COMMIT,PAGE_READWRITE);
+
+
 }
 
-internal_function void Win32UpdateWindow(HDC DeviceContext,RECT *WindowRect, int X, int Y, int Width, int Height)
+internal_function void Win32UpdateWindow(HDC DeviceContext,RECT *ClientRect, int X, int Y, int Width, int Height)
 {
-    int WindowWidth = WindowRect->right - WindowRect->left;
-    int WindowHeight = WindowRect->bottom - WindowRect->top;
+    int WindowWidth = ClientRect->right - ClientRect->left;
+    int WindowHeight = ClientRect->bottom - ClientRect->top;
 
     StretchDIBits(DeviceContext,
         0, 0, BitmapWidth, BitmapHeight,
@@ -81,7 +125,10 @@ Win32MainWindowCallback(HWND Window, UINT Message, WPARAM WParam, LPARAM LParam)
         int Width = Paint.rcPaint.right - Paint.rcPaint.left;
         int Height = Paint.rcPaint.bottom - Paint.rcPaint.top;
 
-        Win32UpdateWindow(DeviceContext, X, Y, Width, Height);
+        RECT ClientRect;
+        GetClientRect(Window, &ClientRect);
+
+        Win32UpdateWindow(DeviceContext,&ClientRect, X, Y, Width, Height);
 
         EndPaint(Window, &Paint);
     }break;
@@ -106,7 +153,7 @@ WinMain(HINSTANCE Instance,
 
     if (RegisterClass(&WindowClass)) // IF the registered windowclass doesnt fail
     {
-        HWND WindowHandle = CreateWindowEx( // we create a window 
+        HWND Window = CreateWindowEx( // we create a window 
             0,
             WindowClass.lpszClassName,
             L"Handmade Hero",
@@ -120,22 +167,39 @@ WinMain(HINSTANCE Instance,
             Instance,
             0
         );
-        if (WindowHandle) // IF the windowhandle doesnt return fail
+        if (Window) // IF the windowhandle doesnt return fail
         {
+            int YOffset = 0;
+            int XOffset = 0;
             Running = true; 
             while (Running) // we start our main messages loop
             {
+                
                 MSG Message;
-                BOOL MessageResult = GetMessage(&Message, 0, 0, 0);
-                if (MessageResult > 0)
+                while(PeekMessageA(&Message, 0, 0, 0, PM_REMOVE))
                 {
+                    if (Message.message == WM_QUIT)
+                    {
+                        Running = false;
+                    }
+
                     TranslateMessage(&Message);
                     DispatchMessage(&Message);
                 }
-                else
-                {
-                    break;
-                }
+
+                RenderWeirdGradient(YOffset, XOffset);
+                HDC DeviceContext = GetDC(Window);
+
+                RECT ClientRect;
+                GetClientRect(Window, &ClientRect);
+
+                int WindowWidth = ClientRect.right - ClientRect.left;
+                int WindowHeight = ClientRect.bottom - ClientRect.top;
+                Win32UpdateWindow(DeviceContext, &ClientRect, 0, 0, WindowWidth, WindowHeight);
+                ReleaseDC(Window, DeviceContext);
+
+                ++XOffset;
+                ++YOffset;
             }
         }
         else
