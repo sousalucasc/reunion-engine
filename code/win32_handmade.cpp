@@ -25,33 +25,25 @@ global_variable int BitmapWidth;
 global_variable int BitmapHeight;
 global_variable int BytesPerPixel = 4;
 
-internal_function void RenderWeirdGradient(int XOffset, int YOffset)
+internal_function void RenderWeirdGradient(int XOffset, int YOffset) 
 {
     int Width = BitmapWidth;
     int Height = BitmapHeight;
-    int Pitch = Width * BytesPerPixel;
-    uint8* Row = (uint8*)BitmapMemory;
+    int Pitch = Width * BytesPerPixel; // from start of one row to start of the next
+    uint8* Row = (uint8*)BitmapMemory; // points to the start of current row
 
-    for (int Y = 0; Y < BitmapHeight; ++Y)
+    for (int Y = 0; Y < BitmapHeight; ++Y) // loops to entire screen
     {
-        uint8* Pixel = (uint8*)Row;
-        for (int X = 0; X < BitmapWidth; ++X)
+        uint32* Pixel = (uint32*)Row;  // a pixel is composed of 32 bits, 8bit B, 8bit G, 8bit R, 8bit for a padding byte
+        for (int X = 0; X < BitmapWidth; ++X) // loops to entire row
         {
-            //blue channel
-            *Pixel = (uint8)(X + XOffset);
-            ++Pixel;
-            //green channel
-            *Pixel = (uint8)(Y + YOffset);
-            ++Pixel;
-            //red channel
-            *Pixel = 0;
-            ++Pixel;
-            //padding byte
-            *Pixel = 0;
-            ++Pixel;
+            uint8 Blue = (X + XOffset);
+            uint8 Green = (Y + YOffset);
+            uint8 Red = 255;
+            *Pixel++ = (Red << 16) | (Green << 8) | Blue;
         }
 
-        Row += Pitch;
+        Row += Pitch; // after an entire row, switch for the next to the next loop iteration
     }
 }
 
@@ -187,7 +179,8 @@ WinMain(HINSTANCE Instance,
                     DispatchMessage(&Message);
                 }
 
-                RenderWeirdGradient(YOffset, XOffset);
+                RenderWeirdGradient(XOffset, YOffset);
+
                 HDC DeviceContext = GetDC(Window);
 
                 RECT ClientRect;
@@ -199,7 +192,6 @@ WinMain(HINSTANCE Instance,
                 ReleaseDC(Window, DeviceContext);
 
                 ++XOffset;
-                ++YOffset;
             }
         }
         else
