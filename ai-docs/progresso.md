@@ -11,10 +11,12 @@ não há commits; este arquivo é o registro.
   - `build\dump_backbuffer.bmp`: conteúdo de `BackPixels` (320x180)
   - `build\dump_screen.bmp`: conteúdo real do DC da janela (`CreateDIBSection` + `BitBlt`), 960x540
 - Conversor BMP→PNG para eu ler a imagem: `C:\Users\lucas\AppData\Local\Temp\opencode\bmp2png.ps1`
-  (os BMPs não abrem direto para você; converto para PNG e mostro no Review pane)
+  (os BMPs não abrem direto para você; converto para PNG e mostro no Review pane; o script usa
+  `param($BmpPath, $PngPath)` posicional e já considera o padding de 4 bytes por linha)
 - Build: rodar `build.bat` **de dentro de `code\`** (`code> build.bat`). Ele chama o vcvarsall x64
   e compila `..\code\main.cpp` → `..\build\mc.exe` (`cl -FC -Zi -Od -W3 ... user32.lib gdi32.lib`).
-  Quando FPS começar a importar, trocar `/Od` por `/O2 /fp:fast`.
+  `code> build.bat release` compila com `/O2 /fp:fast` (benchmark); o padrão continua debug.
+- `mc.exe --nocap` desliga o cap de 60 fps (só para medir; o jogo normal roda com cap).
 
 ## Step 1 — Baseline (main.cpp, base.cpp) — APROVADO
 Criado `code\base.cpp` e `code\main.cpp` conforme o pack. `code\win32_handmade.cpp` ficou intacto (referência do Day 4).
@@ -82,7 +84,7 @@ Correções aprovadas por você (só `main.cpp`, sem criar arquivos, sem novos `
 4. **Bloco de análise movido para o fim de `main.cpp`** (abaixo de `WinMain`), com declarações antecipadas `DumpBegin`/`DumpTick`; o código do engine no laço ficou limpo.
 5. **Cabeçalho BMP do dump corrigido**: os campos estavam escritos em offsets errados (lido antes: `biPlanes=24`, `biBitCount=0`, `biCompression` lixo). Agora `biPlanes` em 12 (=1), `biBitCount` em 14 (=24), `biCompression` em 16 (=0), `biSizeImage` em 20, xppm 24, yppm 28, clrUsed 32, clrImportant 36. Os BMPs agora são legíveis por leitores padrão (24bpp).
 
-Ainda em aberto da auditoria (não corrigidos, são território de outros passos): `WM_PAINT` não tratado; ESC via `GetAsyncKeyState` (global, fecha mesmo sem foco) — o Step 4 trata o foco; desvio do vermelho `red = x*255/(SCREEN_W-1)`.
+Ainda em aberto da auditoria (não corrigidos, são território de outros passos): `WM_PAINT` não tratado (corrigido depois no Step 6.1); ESC via `GetAsyncKeyState` (global, fecha mesmo sem foco) — o Step 4 trata o foco; desvio do vermelho `red = x*255/(SCREEN_W-1)`.
 
 Estado do build após as correções: compila sem erros nem warnings; `WM_CLOSE` limpo (exit code 0); título `FPS: 59 | SQRT2: 1414 | SIN: 1000 | COS: -1000 | VIEWZ: 5000 | PROJW: 5000`.
 
@@ -163,5 +165,108 @@ Check: as duas imagens (dump sem SPACE e dump com SPACE segurado, janela em fore
 
 Ferramenta usada para ver as imagens: só o dump do próprio engine (`build\dump_backbuffer.bmp`, `build\dump_space_*.bmp`) convertido para PNG para eu ler; o script de segurar SPACE apenas dirige input (nada de auditoria por script reimplementando o algoritmo).
 
+## Step 6.1 — Auditoria (pedido seu) — code review dos Steps 1–6 + correções aplicadas
+
+Pergunta: os Steps 1–6 estão bons? O que refazer? Serve para um modelo local numa máquina de jogo?
+
+Veredito: **~8/10, nada precisa ser reescrito**. O que estava errado era periférico (janela, ferramenta de dump, build), não o núcleo (matemática, input, rasterização, depth buffer). Para modelo local rodando a ~30 tok/s o resultado é bom: o código segue as convenções (sem STL/CRT, tipos `u8/u16/u32/i32/f32`, literais `f`, structs/funções globais), compila limpo e os checks dos Steps 1–6 passaram. Os erros que apareceram foram todos "de borda de API do Win32" (parâmetros de `StretchDIBits`, offsets de BMP, `DrawState` como macro), justamente o que um modelo pequeno erra e que uma auditoria pega.
+
+Problemas encontrados e o que cada um custaria depois:
+1. **ESC não passava por `WM_DESTROY`**: o laço fechava com `PostMessageA(WM_CLOSE)` + `Running = FALSE` e saía direto. Quando o Step 35 salvar o mundo no fechamento, ESC não salvaria — bug silencioso e caro de achar. Agora ESC chama `DestroyWindow` e `RunOneFrame` retorna na hora.
+2. **O cap de 60 fps escondia a performance real**: as checagens dos Steps 14/19/34 (muitos chunks, muitas luzes) iam parecer sempre "60 FPS". Agora existe `--nocap` (benchmark) e o título mostra o custo medido por frame em microssegundos.
+3. **Mouse continuava capturado no Alt+Tab**: cursor ficava invisível e preso no centro do jogo até clicar de volta. Agora libera em `WM_ACTIVATEAPP`, quando `PollInput` vê a janela sem foco e em `WM_DESTROY`.
+4. **`WM_PAINT`/`WM_ERASEBKGND` não tratados**: minimizar/restaurar ou arrastar outra janela por cima podia deixar o client em branco até o próximo frame; o Windows também apagava o fundo antes de cada paint. Agora `WM_PAINT` faz `BeginPaint` + `PresentBackbuffer`, e `WM_ERASEBKGND` devolve 1 (o backbuffer cobre tudo).
+5. **Janela minimizada continuava renderizando** (trabalho jogado fora). Agora `IsIconic` pula só o desenho; mensagens, input, `Dt` e pacing continuam rodando.
+6. **Ferramenta de dump**: o BMP ignorava o padding de 4 bytes por linha (quebrava em qualquer largura que não fosse múltipla de 4) e o bitmap da captura era deletado ainda selecionado no DC (e vazava o DC quando `CreateDIBSection` falhava). Corrigidos: `RowPitch` com padding, `SelectObject` de volta no bitmap original antes do `DeleteObject`, DC liberado no caminho de falha, `SaveBmpFromU32` recusa tamanho acima de `BMP_MAX_*`.
+7. **Não havia build release**: `build.bat release` agora usa `/O2 /fp:fast` (o debug fica `/Od /Zi`), e o `build.bat` devolve o exit code real do `cl` (antes devolvia sempre 0).
+8. **Armadilha do Visual Studio**: `code\handmade.vcxproj` compila o `win32_handmade.cpp` antigo, não o `main.cpp`. Se você apertar F5 no VS, roda o projeto velho. Build oficial é `code> build.bat`.
+9. **Sem git**: todo o trabalho está sem snapshot. Se algo der errado num passo futuro não existe `git checkout`. (Não criei repo; fica sua decisão.)
+10. **Rasterizador**: 3 chamadas de edge + 3 divisões por pixel, em `/Od`. É o gargalo natural dos Steps 14/19, mas otimizar agora seria refatorar antes da hora; fica para quando o profiling pedir (`invArea` + edges incrementais).
+
+Correções aplicadas (`base.cpp`, `main.cpp`, `build.bat`, nada de arquivo novo, nenhum `#include` novo):
+- `base.cpp`: `ReleaseMouseCapture()` (um único lugar que devolve o `ShowCursor(TRUE)` correspondente ao `FALSE` da captura); `PollInput` libera o mouse e zera os `Prev*` quando a janela perde o foco; o edge do ESC usa o helper.
+- `main.cpp`: `WM_ERASEBKGND`, `WM_PAINT`, `WM_ACTIVATEAPP`; `WM_DESTROY` libera mouse + DC + `PostQuitMessage`; `PresentBackbuffer` ignora `WM_PAINT` que chega antes do `BITMAPINFO` estar preenchido; `RunOneFrame` mede o trabalho com `QueryPerformanceCounter` e publica `US` no slot 7; `--nocap` pula o `PacingWait`; `CommandLineHas()` substitui a busca manual de `--dump`; BMP com padding.
+- `build.bat`: modo `release` e exit code correto.
+
+Medições depois das correções (build release):
+- `mc.exe --dump`: `FPS: 59 | US: 845` → com cap, o trabalho do frame custa ~0,85 ms (inclui `StretchDIBits`)
+- `mc.exe --nocap --dump`: `FPS: 1438 | US: 661` → sem cap o custo cai para ~0,66 ms; o resto do frame com cap é espera
+- `dump_backbuffer.bmp`: 320x180, 172.854 bytes (cabeçalho 54 + 320*180*3), 41.428 cores distintas, quadrado branco com exatamente 100 px, vermelho 1200 px, azul 4546 px → imagem do Step 6 inalterada
+- captura/ESC: clique captura (cursor flags 0), 1º ESC devolve o cursor e a janela continua viva, 2º ESC fecha com exit code 0; `WM_ACTIVATEAPP(FALSE)` devolve o cursor e ele fica livre (774,315 pedido = 774,315 lido)
+- build debug e release: 0 erros, 0 warnings (`/W3`)
+
+Nota para os próximos passos: o slot 7 do título está ocupado por `US`. O Step 8 usa 1–3 (livres) e o Step 35 usa o 7 → nesse passo o `US` sai ou muda de lugar.
+
+## Step 7 — Triângulo 3D (`raster.cpp`, `main.cpp`) — IMPLEMENTADO, checks passaram
+Plano: `ai-docs\step7_plan.md`. Spec: `qwen_prompt_pack.md` Step 7.
+
+`raster.cpp` (adicionado no fim do arquivo, nada acima foi tocado):
+- `struct Camera { v3 pos; f32 yaw; f32 pitch; }`, `Camera Cam = { {0,1,-6}, 0, 0 }`, `m4 GViewProj`
+- `SetupCamera()`: `GViewProj = M4Mul(M4Perspective(1.2217f, (f32)SCREEN_W/(f32)SCREEN_H), M4View(Cam.pos, Cam.yaw, Cam.pitch))`
+- `ProjectToScreen(v4 clip)`: `invW = 1/clip.w`, `ndcX = clip.x*invW`, `ndcY = clip.y*invW`,
+  `x = (ndcX*0.5+0.5)*SCREEN_W`, `y = (0.5-ndcY*0.5)*SCREEN_H` (fórmula das CONVENTIONS)
+- `DrawTriangle3D(v3 a,b,c, u32 color)`: transforma os 3 com `M4MulV4(GViewProj, V4(x,y,z,1))`,
+  **retorna se qualquer `w < NEAR_W`** (clip chega no Step 9), sets `DS.FlatColor`, chama `RasterTriangle`
+- O bounding box e o depth test do Step 5/6 já cuidam do clip de tela e da ordem de desenho
+
+`main.cpp`:
+- Removidos os testes antigos: `FillGradient` + `FrameCounter` (Step 1), `SquareX/SquareY` +
+  `UpdateAndDrawTestSquare` (Step 4), `RotateScreenVert` + `DrawTestTriangles` (Step 6)
+- Novos: `CAMERA_TURN_SPEED = 1.5f`, `UpdateCameraWithArrowKeys()` (setas: yaw ±, pitch ±,
+  `Clamp(pitch, -1.5, 1.5)`, `DebugSet(1,"YAW", Cam.yaw*1000)`) e `DrawTestTriangles3D()`
+  (laranja `MakeColor(255,160,0)` em (-2,0,0)(2,0,0)(0,3,0); ciano `MakeColor(0,200,200)` em
+  (-1,0,-1)(1,0,1)(0,2,0))
+- Ordem do frame: `UpdateCameraWithArrowKeys()` → `SetupCamera()` → `ClearScreen(MakeColor(120,170,230))`
+  → `ClearDepth()` → `DrawTestTriangles3D()` → `PresentBackbuffer`
+- `DebugSet(2, 0, 0)` em `WinMain`: o teste do Step 4 deixava o label `MOUSEX` sobrando no título
+  (`DebugFlush` imprime todo slot com label não-zero). Título final: `FPS | YAW | US` (2..6 vazios)
+
+Correção achada na auditoria (ferramenta, não engine): copiar os dumps com sleep cego lia os arquivos
+**do run anterior**. Agora a auditoria espera o `LastWriteTime` ser posterior ao início do processo
+(`step7_audit2/3.ps1`). Outro achado: o script usava `Press(VK_MENU)` para conseguir foreground —
+Alt+Space abre o **menu de sistema** do Windows, cujo loop modal pausa o laço de frame do app e come
+as setas (foi o menu que você viu na tela). Trocado por `AttachThreadInput` + `BringWindowToTop`,
+sem Alt. Runs "live" (sem `--dump`) não têm auto-close; o script fecha com `PostMessage(WM_CLOSE)`
+(caminho do botão X) e mata processos sobrantes no fim.
+
+Medições (build debug, `--dump` da raiz, frames frescos só):
+- cena parada: paleta exatamente 3 cores (`78AAE6` céu, `FFA000` laranja, `00C8C8` ciano),
+  laranja 2237 px x 118–201 y 48–110, ciano 556 px x 134–159 y 69–115, céu 54807 px de 57600
+  → union 2793 px, como previsto pela projeção; a linha onde o ciano atravessa o laranja é ~x=160
+  (ciano vence onde `invW > 1/6`, laranja onde é mais fundo), como no Step 6
+- sem tecla: os dois frames do mesmo run são **idênticos** (cena determinística)
+- `setas` (`step7_audit3.ps1`, hold curto para a cena não sumir):
+  RIGHT yaw 0→+195 → laranja x 118–201 → 88–175 e ciano minX 134→107 (**objetos deslizam para a
+  esquerda**, o check do pack); LEFT yaw 0→−247 → laranja x 151–241 (espelho, para a direita);
+  UP pitch 0→+223 → laranja y 48–110 → 78–142 (objetos descem); DOWN pitch 0→−222 → y 13–82 (sobem)
+- taxa de giro: segurando RIGHT 1,4 s o yaw chegou a +1697 (~1,1 s de tecla → 1,5 rad/s ✓)
+- **clamp do pitch**: `DebugSet(2,"PITCH", Cam.pitch*1000)` foi adicionado **só para a auditoria** e
+  removido depois; segurando UP 1,4 s o pitch parou exatamente em 1500 e segurando DOWN exatamente em
+  −1500, nunca além (`Clamp` funciona)
+- captura/ESC intactos (Step 4): clique → cursor flags 0 (oculto), setas continuam girando a câmera
+  com o mouse capturado, 1º ESC → flags 1 e janela viva, cursor fica livre, 2º ESC → exit code 0
+- extremo de yaw/pitch: com yaw ≳1,2 rad ou pitch ≳1,4 os triângulos **desaparecem** (rejeição por
+  vértice `w < NEAR_W`) — é a regra do Step 7 de propósito; o Sutherland-Hodgman do Step 9 conserta
+- builds debug e release: 0 erros, 0 warnings (`/W3`); debug `FPS: 59 | US: ~1700`, release `--nocap`
+  `FPS: 1943 | US: 492` → a cena 3D custa ~0,5 ms/frame em `/O2`
+- nada de `mc.exe` sobrando depois da auditoria; `WM_CLOSE` limpo
+
+Ferramentas de análise usadas (fora do código do engine): `step7_audit2.ps1`, `step7_audit3.ps1`,
+`step7_regress.ps1`, `bmp2png.ps1`; imagens convertidas para PNG e mostradas no Review pane.
+Nota de PowerShell 5.1: `[ushort]` não existe como accelerator (`[System.UInt16]`, ou campos `ushort`
+no struct e atribuição normal); `[type=...]` em attribute falha; `SRCCOPY` é `0x00200021`.
+A captura externa do DC deste passo (`BitBlt` do DC da janela lido de fora do processo) voltou preto;
+a captura do próprio engine (`dump_screen.bmp`) continua correta — fica como limitação da ferramenta,
+sem efeito no engine.
+
+`ai-docs\api.txt` gerado com o prompt de API do pack (assinaturas de `base.cpp`, `raster.cpp`, `main.cpp`).
+
 ## Próximo passo
-Step 7 — Triângulo 3D (`raster.cpp`, `main.cpp`): `Camera { v3 pos; f32 yaw, pitch; }`, `Cam = { {0,1,-6}, 0, 0 }`, `m4 GViewProj`, `SetupCamera()` com `M4Perspective(1.2217f, SCREEN_W/SCREEN_H)` × `M4View`, `ProjectToScreen(v4 clip)` (invW = 1/clip.w, NDC → screen), `DrawTriangle3D(v3 a,b,c, u32 color)` (transforma os 3 pontos, retorna se qualquer `w < NEAR_W`, sets `DS.FlatColor`, rasteriza). Em `main.cpp`: remover o código de teste 2D antigo; setas mudam `Cam.yaw`/`Cam.pitch` a 1.5 rad/s × `Dt` (pitch clamp ±1.5); cada frame `SetupCamera()`, `ClearScreen(MakeColor(120,170,230))`, `ClearDepth()`, dois `DrawTriangle3D` (laranja e ciano); `Cam.yaw*1000` no slot 1 do título. Check: dois triângulos visíveis; seta direita gira a câmera para a direita (objetos deslizam para a esquerda).
+Step 8 — Câmera free-fly (`player.cpp` novo, `main.cpp`): `MoveSpeed = 10.0f`, `MouseSens = 0.0025f`,
+`UpdateFlyCamera()` (mouse capturado gira com `In.mouseDX/DY`; setas continuam a 1.5 rad/s × `Dt`,
+pitch clamp ±1.5; WASD no plano XZ, `Space` sobe, `Ctrl` desce, `Shift` ×2, normaliza a direção e
+multiplica por `MoveSpeed*Dt`); criar `player.cpp` e incluir no fim da lista de includes de `main.cpp`;
+chamar `UpdateFlyCamera()` antes de `SetupCamera()`, substituindo `UpdateCameraWithArrowKeys()`;
+slots 1–3 = `Cam.pos` x, y, z ×1000. Check: click captura, mouse gira naturalmente, WASD relativo ao
+que você olha, Space/Ctrl sobem/descem. O slot 2 fica livre (`DebugSet(2, 0, 0)` continua válido).
+

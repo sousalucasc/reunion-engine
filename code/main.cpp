@@ -7,13 +7,34 @@ static BOOL Running = TRUE;
 static HWND MainWindow = 0;
 static HDC WindowDC = 0;
 static BITMAPINFO ScreenBitmapInfo;
-static i32 FrameCounter = 0;
 static BOOL DumpMode = FALSE;
+static BOOL NoCapMode = FALSE; // --nocap: run flat out for benchmarks only
 
 // The visual-analysis tool lives at the bottom of this file, after the engine code.
 // Declared here so WinMain can start it and tick it. Without --dump it never runs.
 void DumpBegin(LPSTR commandLine);
 void DumpTick(HWND Window);
+
+// Used by WM_PAINT, which is defined before PresentBackbuffer's body.
+void PresentBackbuffer(HWND Window);
+
+// Tiny command-line flag search, so both --dump and --nocap use the same rule.
+bool CommandLineHas(LPSTR commandLine, const char* flag)
+{
+    if (commandLine == 0 || flag == 0 || flag[0] == 0) return false;
+
+    i32 flagLength = 0;
+    while (flag[flagLength] != 0) ++flagLength;
+
+    for (i32 i = 0; commandLine[i] != 0; ++i)
+    {
+        i32 j = 0;
+        while (j < flagLength && commandLine[i + j] == flag[j]) ++j;
+        if (j == flagLength) return true;
+    }
+
+    return false;
+}
 
 // --- Window messages ---
 LRESULT CALLBACK WindowCallback(HWND Window, UINT Message, WPARAM WParam, LPARAM LParam)
@@ -29,6 +50,9 @@ LRESULT CALLBACK WindowCallback(HWND Window, UINT Message, WPARAM WParam, LPARAM
 
         case WM_DESTROY:
         {
+            // Later steps save the world here; it must run once, however the window closes.
+            ReleaseMouseCapture();
+
             // CS_OWNDC: this is the window's one device context, released once here.
             if (WindowDC)
             {
@@ -37,6 +61,34 @@ LRESULT CALLBACK WindowCallback(HWND Window, UINT Message, WPARAM WParam, LPARAM
             }
             Running = FALSE;
             PostQuitMessage(0);
+        } break;
+
+        case WM_ACTIVATEAPP:
+        {
+            // Alt+Tab and other app switches give the cursor back.
+            if (!WParam)
+            {
+                ReleaseMouseCapture();
+            }
+        } break;
+
+        case WM_ERASEBKGND:
+        {
+            // The backbuffer covers every pixel, so there is nothing to erase.
+            Result = 1;
+        } break;
+
+        case WM_PAINT:
+        {
+            // Windows asks for a repaint on resize, restore and expose. Without this the
+            // client area can stay blank until the next frame.
+            PAINTSTRUCT Paint;
+            HDC PaintDC = BeginPaint(Window, &Paint);
+            if (PaintDC)
+            {
+                PresentBackbuffer(Window);
+            }
+            EndPaint(Window, &Paint);
         } break;
 
         default:
@@ -48,94 +100,27 @@ LRESULT CALLBACK WindowCallback(HWND Window, UINT Message, WPARAM WParam, LPARAM
     return Result;
 }
 
-void FillGradient(u32 blue)
+// --- Step 7: camera turning and the 3D test scene ---
+const f32 CAMERA_TURN_SPEED = 1.5f; // radians per second
+
+void UpdateCameraWithArrowKeys()
 {
-    // Continuous red across the width: red = x would wrap at x = 256 (u8).
-    for (i32 y = 0; y < SCREEN_H; ++y)
-    {
-        for (i32 x = 0; x < SCREEN_W; ++x)
-        {
-            u8 red = u8(f32(x) * 255.0f / f32(SCREEN_W - 1));
-            PutPixel(x, y, MakeColor(red, u8(y), u8(blue)));
-        }
-    }
+    if (In.left) Cam.yaw -= CAMERA_TURN_SPEED * Dt;
+    if (In.right) Cam.yaw += CAMERA_TURN_SPEED * Dt;
+    if (In.up) Cam.pitch += CAMERA_TURN_SPEED * Dt;
+    if (In.down) Cam.pitch -= CAMERA_TURN_SPEED * Dt;
+
+    Cam.pitch = Clamp(Cam.pitch, -1.5f, 1.5f);
+
+    DebugSet(1, "YAW", i32(Cam.yaw * 1000.0f));
 }
 
-// --- Temporary test for step 4 input ---
-static f32 SquareX = 150.0f;
-static f32 SquareY = 85.0f;
-
-void UpdateAndDrawTestSquare()
+void DrawTestTriangles3D()
 {
-    const f32 SQUARE_SPEED = 100.0f; // pixels per second
-    const i32 SQUARE_SIZE = 10;
-
-    if (In.w) SquareY -= SQUARE_SPEED * Dt;
-    if (In.s) SquareY += SQUARE_SPEED * Dt;
-    if (In.a) SquareX -= SQUARE_SPEED * Dt;
-    if (In.d) SquareX += SQUARE_SPEED * Dt;
-
-    DebugSet(1, "MOUSEX", In.mouseDX);
-    DebugSet(2, "MOUSEY", In.mouseDY);
-
-    i32 left = FloorI(SquareX);
-    i32 top = FloorI(SquareY);
-
-    for (i32 y = 0; y < SQUARE_SIZE; ++y)
-    {
-        for (i32 x = 0; x < SQUARE_SIZE; ++x)
-        {
-            PutPixel(left + x, top + y, MakeColor(255, 255, 255));
-        }
-    }
-}
-
-// --- Temporary test for step 6: depth buffer ---
-static ScreenVert RotateScreenVert(ScreenVert v, f32 centerX, f32 centerY, f32 angle)
-{
-    ScreenVert result;
-    result.x = centerX + Cos(angle) * (v.x - centerX) - Sin(angle) * (v.y - centerY);
-    result.y = centerY + Sin(angle) * (v.x - centerX) + Cos(angle) * (v.y - centerY);
-    result.invW = v.invW;
-    return result;
-}
-
-void DrawTestTriangles()
-{
-    // Triangle A: a wide triangle, all three vertices invW = 0.2.
-    ScreenVert A1 = { 100.0f, 40.0f, 0.2f };
-    ScreenVert A2 = { 220.0f, 40.0f, 0.2f };
-    ScreenVert A3 = { 160.0f, 120.0f, 0.2f };
-
-    // Triangle B: the same shape rotated about its centre so it overlaps A, slanting in
-    // depth: one vertex invW = 0.1 (farther than A), the other two invW = 0.4 (nearer).
-    f32 centreX = (100.0f + 220.0f + 160.0f) / 3.0f;
-    f32 centreY = (40.0f + 40.0f + 120.0f) / 3.0f;
-    f32 angle = 0.35f;
-
-    ScreenVert B1 = RotateScreenVert(A1, centreX, centreY, angle);
-    ScreenVert B2 = RotateScreenVert(A2, centreX, centreY, angle);
-    ScreenVert B3 = RotateScreenVert(A3, centreX, centreY, angle);
-    B1.invW = 0.1f;
-    B2.invW = 0.4f;
-    B3.invW = 0.4f;
-
-    // Normal order: B first, then A. Holding SPACE swaps the order, so the depth test
-    // decides who wins instead of the draw order.
-    if (In.space)
-    {
-        DS.FlatColor = MakeColor(255, 0, 0);
-        RasterTriangle(A1, A2, A3);
-        DS.FlatColor = MakeColor(0, 0, 255);
-        RasterTriangle(B1, B2, B3);
-    }
-    else
-    {
-        DS.FlatColor = MakeColor(0, 0, 255);
-        RasterTriangle(B1, B2, B3);
-        DS.FlatColor = MakeColor(255, 0, 0);
-        RasterTriangle(A1, A2, A3);
-    }
+    DrawTriangle3D(V3(-2.0f, 0.0f, 0.0f), V3(2.0f, 0.0f, 0.0f), V3(0.0f, 3.0f, 0.0f),
+                   MakeColor(255, 160, 0));
+    DrawTriangle3D(V3(-1.0f, 0.0f, -1.0f), V3(1.0f, 0.0f, 1.0f), V3(0.0f, 2.0f, 0.0f),
+                   MakeColor(0, 200, 200));
 }
 
 void PresentBackbuffer(HWND Window)
@@ -143,6 +128,9 @@ void PresentBackbuffer(HWND Window)
     // The CS_OWNDC device context is held from window creation until WM_DESTROY,
     // so no HDC is created or freed per frame.
     if (WindowDC == 0) return;
+
+    // WM_PAINT can arrive during CreateWindowExA, before WinMain fills this in.
+    if (ScreenBitmapInfo.bmiHeader.biBitCount == 0) return;
 
     RECT ClientRect;
     GetClientRect(Window, &ClientRect);
@@ -240,9 +228,13 @@ void PacingShutdown()
 void RunOneFrame()
 {
     static f32 FPSTimer = 0.0f;
+    static f32 WorkSecondsInWindow = 0.0f;
     static f32 FlushTimer = 0.0f;
     static i32 FramesInWindow = 0;
     static bool PrevEscapeForClose = false;
+
+    LARGE_INTEGER WorkStart;
+    QueryPerformanceCounter(&WorkStart);
 
     // Whether the mouse was captured at the start of this frame, before PollInput
     // can release it. ESC while captured only releases the mouse; ESC while not
@@ -261,6 +253,7 @@ void RunOneFrame()
         TranslateMessage(&Message);
         DispatchMessage(&Message);
     }
+    if (!Running) return; // WM_DESTROY or WM_QUIT already ended the loop
 
     Dt = FrameClock();
     if (Dt > 0.1f)
@@ -268,15 +261,19 @@ void RunOneFrame()
         Dt = 0.1f;
     }
 
-    ++FramesInWindow;
-    FPSTimer += Dt;
-    if (FPSTimer >= 0.5f)
+    bool escapePressedForClose = In.escape && !PrevEscapeForClose;
+    PrevEscapeForClose = In.escape;
+
+    if (!DumpMode && !wasCaptured && escapePressedForClose)
     {
-        CurrentFPS = i32(f32(FramesInWindow) / FPSTimer);
-        DebugSet(0, "FPS", CurrentFPS);
-        FPSTimer = 0.0f;
-        FramesInWindow = 0;
+        // DestroyWindow goes through WM_DESTROY, so whatever later steps clean up or
+        // save on exit runs on this path too.
+        DestroyWindow(MainWindow);
+        Running = FALSE;
+        return;
     }
+
+    UpdateCameraWithArrowKeys();
 
     FlushTimer += Dt;
     if (FlushTimer >= 0.25f)
@@ -285,21 +282,34 @@ void RunOneFrame()
         FlushTimer = 0.0f;
     }
 
-    bool escapePressedForClose = In.escape && !PrevEscapeForClose;
-    PrevEscapeForClose = In.escape;
+    // A minimized window has no client area to draw into; skip the work but keep
+    // pumping messages and pacing, so restoring the window is instant and correct.
+    if (IsIconic(MainWindow)) return;
 
-    if (!DumpMode && !wasCaptured && escapePressedForClose)
-    {
-        PostMessageA(MainWindow, WM_CLOSE, 0, 0);
-        Running = FALSE;
-    }
-
-    ++FrameCounter;
-    FillGradient(u32(FrameCounter));
+    SetupCamera();
+    ClearScreen(MakeColor(120, 170, 230));
     ClearDepth();
-    DrawTestTriangles();
-    UpdateAndDrawTestSquare();
+    DrawTestTriangles3D();
     PresentBackbuffer(MainWindow);
+
+    // Measured work, not just the frame interval: with --nocap this is the real render
+    // cost, and with the 60 fps cap it stays well under 16666.
+    LARGE_INTEGER WorkEnd;
+    QueryPerformanceCounter(&WorkEnd);
+    WorkSecondsInWindow += f32(WorkEnd.QuadPart - WorkStart.QuadPart) / f32(PacingFrequency.QuadPart);
+
+    ++FramesInWindow;
+    FPSTimer += Dt;
+    if (FPSTimer >= 0.5f)
+    {
+        CurrentFPS = i32(f32(FramesInWindow) / FPSTimer);
+        i32 USPerFrame = i32((WorkSecondsInWindow / f32(FramesInWindow)) * 1000000.0f);
+        DebugSet(0, "FPS", CurrentFPS);
+        DebugSet(7, "US", USPerFrame);
+        FPSTimer = 0.0f;
+        WorkSecondsInWindow = 0.0f;
+        FramesInWindow = 0;
+    }
 
     DumpTick(MainWindow);
 }
@@ -308,6 +318,7 @@ int CALLBACK WinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPSTR CommandLi
 {
     SetProcessDPIAware();
     DumpBegin(CommandLine);
+    NoCapMode = CommandLineHas(CommandLine, "--nocap");
 
     WNDCLASS WindowClass;
     WindowClass.style = CS_HREDRAW | CS_VREDRAW | CS_OWNDC;
@@ -355,6 +366,10 @@ int CALLBACK WinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPSTR CommandLi
 
     GlobalWindow = MainWindow;
 
+    // The step 4 test wrote MOUSEX/MOUSEY into slots 1 and 2 and step 7 removes that test.
+    // DebugFlush prints every slot whose label is not 0, so clear slot 2 once here.
+    DebugSet(2, 0, 0);
+
     // CS_OWNDC gives this window one permanent device context; grab it once.
     WindowDC = GetDC(MainWindow);
 
@@ -379,7 +394,12 @@ int CALLBACK WinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPSTR CommandLi
 
         LARGE_INTEGER FrameEnd;
         QueryPerformanceCounter(&FrameEnd);
-        PacingWait(FrameEnd.QuadPart - FrameStart.QuadPart);
+
+        // --nocap is for measurements only: it runs flat out so the frame cost is visible.
+        if (!NoCapMode && Running)
+        {
+            PacingWait(FrameEnd.QuadPart - FrameStart.QuadPart);
+        }
     }
 
     PacingShutdown();
@@ -423,7 +443,14 @@ void StoreU16(u8* dst, u16 value)
 // biYppm 28, biClrUsed 32, biClrImportant 36.
 void SaveBmpFromU32(const u32* pixels, i32 pitchPixels, i32 width, i32 height, const char* path)
 {
-    u32 PixelBytes = (u32)(width * height * 3);
+    if (width <= 0 || height <= 0) return;
+    if (width > BMP_MAX_W || height > BMP_MAX_H) return;
+
+    // BMP rows run bottom-up and every row is padded to a 4 byte boundary.
+    i32 RowBytes = width * 3;
+    i32 Padding = (4 - (RowBytes % 4)) % 4;
+    i32 RowPitch = RowBytes + Padding;
+    u32 PixelBytes = (u32)(RowPitch * height);
     u32 FileSize = 14 + 40 + PixelBytes;
 
     u8 header[14];
@@ -459,6 +486,12 @@ void SaveBmpFromU32(const u32* pixels, i32 pitchPixels, i32 width, i32 height, c
             BmpPixels[out + 2] = u8((color >> 16) & 0xFF);
             out += 3;
         }
+
+        for (i32 p = 0; p < Padding; ++p)
+        {
+            BmpPixels[out] = 0;
+            ++out;
+        }
     }
 
     DWORD Written = 0;
@@ -480,6 +513,7 @@ void SaveDumpBmp(const char* path)
 // Screen capture: read back what the window's device context really holds.
 static HDC CaptureMemDC = 0;
 static HBITMAP CaptureBitmap = 0;
+static HBITMAP CaptureOldBitmap = 0;
 static void* CaptureBits = 0;
 static BITMAPINFO CaptureInfo;
 static i32 CaptureWidth = 0;
@@ -564,19 +598,29 @@ BOOL CaptureWindowPixels(HWND Window, const char* path)
 
     if (Width != CaptureWidth || Height != CaptureHeight)
     {
+        // Delete in the right order: our bitmap is selected out of the DC first.
         if (CaptureBitmap)
         {
-            SelectObject(CaptureMemDC, CaptureBitmap);
+            if (CaptureMemDC && CaptureOldBitmap)
+            {
+                SelectObject(CaptureMemDC, CaptureOldBitmap);
+            }
             DeleteObject(CaptureBitmap);
-            DeleteDC(CaptureMemDC);
             CaptureBitmap = 0;
-            CaptureMemDC = 0;
+            CaptureOldBitmap = 0;
             CaptureBits = 0;
+        }
+
+        if (CaptureMemDC)
+        {
+            DeleteDC(CaptureMemDC);
+            CaptureMemDC = 0;
         }
 
         HDC ReferenceDC = GetDC(Window);
         CaptureMemDC = CreateCompatibleDC(ReferenceDC);
         ReleaseDC(Window, ReferenceDC);
+        if (!CaptureMemDC) return FALSE;
 
         MemZero(&CaptureInfo, (i32)sizeof(BITMAPINFO));
         CaptureInfo.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
@@ -587,9 +631,14 @@ BOOL CaptureWindowPixels(HWND Window, const char* path)
         CaptureInfo.bmiHeader.biCompression = BI_RGB;
 
         CaptureBitmap = CreateDIBSection(CaptureMemDC, &CaptureInfo, DIB_RGB_COLORS, &CaptureBits, 0, 0);
-        if (!CaptureBitmap) return FALSE;
+        if (!CaptureBitmap)
+        {
+            DeleteDC(CaptureMemDC);
+            CaptureMemDC = 0;
+            return FALSE;
+        }
 
-        SelectObject(CaptureMemDC, CaptureBitmap);
+        CaptureOldBitmap = (HBITMAP)SelectObject(CaptureMemDC, CaptureBitmap);
         CaptureWidth = Width;
         CaptureHeight = Height;
     }
@@ -607,21 +656,12 @@ BOOL CaptureWindowPixels(HWND Window, const char* path)
 void DumpBegin(LPSTR commandLine)
 {
     DumpMode = FALSE;
-    if (commandLine == 0) return;
+    if (!CommandLineHas(commandLine, "--dump")) return;
 
-    for (i32 i = 0; commandLine[i] != 0; ++i)
-    {
-        if (commandLine[i] == '-' && commandLine[i + 1] == '-' &&
-            commandLine[i + 2] == 'd' && commandLine[i + 3] == 'u' &&
-            commandLine[i + 4] == 'm' && commandLine[i + 5] == 'p')
-        {
-            DumpMode = TRUE;
-            QueryPerformanceFrequency(&DumpPerfFrequency);
-            QueryPerformanceCounter(&DumpStartCounter);
-            DumpLastCounter = DumpStartCounter;
-            return;
-        }
-    }
+    DumpMode = TRUE;
+    QueryPerformanceFrequency(&DumpPerfFrequency);
+    QueryPerformanceCounter(&DumpStartCounter);
+    DumpLastCounter = DumpStartCounter;
 }
 
 void DumpTick(HWND Window)

@@ -100,3 +100,48 @@ void RasterTriangle(ScreenVert a, ScreenVert b, ScreenVert c)
         }
     }
 }
+
+// --- Camera and 3D projection (step 7) ---
+struct Camera
+{
+    v3 pos;
+    f32 yaw;
+    f32 pitch;
+};
+
+Camera Cam = { {0.0f, 1.0f, -6.0f}, 0.0f, 0.0f };
+m4 GViewProj;
+
+void SetupCamera()
+{
+    m4 projection = M4Perspective(1.2217f, (f32)SCREEN_W / (f32)SCREEN_H);
+    m4 view = M4View(Cam.pos, Cam.yaw, Cam.pitch);
+    GViewProj = M4Mul(projection, view);
+}
+
+ScreenVert ProjectToScreen(v4 clip)
+{
+    f32 invW = 1.0f / clip.w;
+    f32 ndcX = clip.x * invW;
+    f32 ndcY = clip.y * invW;
+
+    ScreenVert result;
+    result.x = (ndcX * 0.5f + 0.5f) * (f32)SCREEN_W;
+    result.y = (0.5f - ndcY * 0.5f) * (f32)SCREEN_H;
+    result.invW = invW;
+    return result;
+}
+
+void DrawTriangle3D(v3 a, v3 b, v3 c, u32 color)
+{
+    v4 clipA = M4MulV4(GViewProj, V4(a.x, a.y, a.z, 1.0f));
+    v4 clipB = M4MulV4(GViewProj, V4(b.x, b.y, b.z, 1.0f));
+    v4 clipC = M4MulV4(GViewProj, V4(c.x, c.y, c.z, 1.0f));
+
+    // Any vertex behind the near plane rejects the whole triangle. Real clipping is step 9,
+    // so the test scene stays entirely in front of the camera.
+    if (clipA.w < NEAR_W || clipB.w < NEAR_W || clipC.w < NEAR_W) return;
+
+    DS.FlatColor = color;
+    RasterTriangle(ProjectToScreen(clipA), ProjectToScreen(clipB), ProjectToScreen(clipC));
+}

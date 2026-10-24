@@ -1,0 +1,141 @@
+# API.txt — gerado depois do Step 7 passar (prompt de API do pack)
+# Assinaturas apenas, sem corpo, agrupado por arquivo.
+
+## base.cpp
+typedef u8 (unsigned char)
+typedef u16 (unsigned short)
+typedef u32 (unsigned int)
+typedef i32 (int)
+typedef f32 (float)
+const i32 SCREEN_W = 320
+const i32 SCREEN_H = 180
+static u32 BackPixels[SCREEN_W * SCREEN_H]
+u32 MakeColor(u8 r, u8 g, u8 b)
+void PutPixel(i32 x, i32 y, u32 color)
+void ClearScreen(u32 color)
+HWND GlobalWindow
+f32 Dt
+i32 CurrentFPS
+struct DebugSlot { const char* label; i32 value; }
+static DebugSlot DebugSlots[8]
+void DebugSet(i32 slot, const char* label, i32 value)
+void DebugFlush()
+static LARGE_INTEGER PerfFrequency
+static LARGE_INTEGER LastCounter
+static BOOL ClockStarted
+f32 FrameClock()
+const f32 PI = 3.14159265f
+const f32 TAU = 6.28318531f
+const f32 NEAR_W = 0.05f
+f32 Abs(f32 x)
+i32 AbsI(i32 x)
+f32 Min(f32 a, f32 b)
+f32 Max(f32 a, f32 b)
+i32 MinI(i32 a, i32 b)
+i32 MaxI(i32 a, i32 b)
+f32 Clamp(f32 v, f32 lo, f32 hi)
+f32 Lerp(f32 a, f32 b, f32 t)
+f32 Floor(f32 x)
+i32 FloorI(f32 x)
+i32 FloorDiv(i32 a, i32 b)
+i32 Mod(i32 a, i32 b)
+f32 Sqrt(f32 x)
+f32 Sin(f32 x)
+f32 Cos(f32 x)
+void MemZero(void* p, i32 bytes)
+void MemCopy(void* dst, const void* src, i32 bytes)
+struct v3 { f32 x, y, z; }
+struct v4 { f32 x, y, z, w; }
+struct m4 { f32 m[4][4]; }
+v3 V3(f32 x, f32 y, f32 z)
+v3 V3Add(v3 a, v3 b)
+v3 V3Sub(v3 a, v3 b)
+v3 V3Scale(v3 a, f32 s)
+f32 V3Dot(v3 a, v3 b)
+v3 V3Cross(v3 a, v3 b)
+f32 V3Len(v3 a)
+v3 V3Norm(v3 a)
+v4 V4(f32 x, f32 y, f32 z, f32 w)
+m4 M4Identity()
+m4 M4Mul(m4 a, m4 b)
+v4 M4MulV4(m4 m, v4 v)
+m4 M4Perspective(f32 fovY, f32 aspect)
+m4 M4View(v3 pos, f32 yaw, f32 pitch)
+struct Input { bool w, a, s, d, up, down, left, right, space, ctrl, shift, escape, lmb, rmb; bool lmbPressed, rmbPressed; bool f3, f3Pressed, f5Pressed, t, f, fPressed; bool keyNum[5]; i32 mouseDX, mouseDY; }
+Input In
+bool MouseCaptured
+static bool PrevLmb
+static bool PrevRmb
+static bool PrevF3
+static bool PrevF5
+static bool PrevF
+static bool PrevEscape
+void ReleaseMouseCapture()
+void PollInput()
+
+## raster.cpp
+#undef DrawState
+struct ScreenVert { f32 x, y, invW; }
+f32 EdgeFunction(ScreenVert a, ScreenVert b, f32 px, f32 py)
+struct DrawState { u32 FlatColor; }
+DrawState DS
+static f32 Depth[SCREEN_W * SCREEN_H]
+void ClearDepth()
+u32 ShadePixel(f32 invW)
+void RasterTriangle(ScreenVert a, ScreenVert b, ScreenVert c)
+struct Camera { v3 pos; f32 yaw; f32 pitch; }
+Camera Cam = { {0.0f, 1.0f, -6.0f}, 0.0f, 0.0f }
+m4 GViewProj
+void SetupCamera()
+ScreenVert ProjectToScreen(v4 clip)
+void DrawTriangle3D(v3 a, v3 b, v3 c, u32 color)
+
+## main.cpp
+static BOOL Running
+static HWND MainWindow
+static HDC WindowDC
+static BITMAPINFO ScreenBitmapInfo
+static BOOL DumpMode
+static BOOL NoCapMode
+void DumpBegin(LPSTR commandLine)
+void DumpTick(HWND Window)
+void PresentBackbuffer(HWND Window)
+bool CommandLineHas(LPSTR commandLine, const char* flag)
+LRESULT CALLBACK WindowCallback(HWND Window, UINT Message, WPARAM WParam, LPARAM LParam)
+const f32 CAMERA_TURN_SPEED = 1.5f
+void UpdateCameraWithArrowKeys()
+void DrawTestTriangles3D()
+void PresentBackbuffer(HWND Window)
+const i32 TARGET_FPS = 60
+typedef TimeBeginPeriodFunc
+typedef TimeEndPeriodFunc
+static LARGE_INTEGER PacingFrequency
+static HANDLE FrameTimer
+static HMODULE WinmmLibrary
+void PacingSetup()
+void PacingWait(LONGLONG UsedTicks)
+void PacingShutdown()
+void RunOneFrame()
+int CALLBACK WinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPSTR CommandLine, int ShowCode)
+static LARGE_INTEGER DumpPerfFrequency
+static LARGE_INTEGER DumpStartCounter
+static LARGE_INTEGER DumpLastCounter
+static const i32 BMP_MAX_W = 1920
+static const i32 BMP_MAX_H = 1080
+static u8 BmpPixels[BMP_MAX_W * BMP_MAX_H * 3]
+void StoreU32(u8* dst, u32 value)
+void StoreU16(u8* dst, u16 value)
+void SaveBmpFromU32(const u32* pixels, i32 pitchPixels, i32 width, i32 height, const char* path)
+void SaveDumpBmp(const char* path)
+static HDC CaptureMemDC
+static HBITMAP CaptureBitmap
+static HBITMAP CaptureOldBitmap
+static void* CaptureBits
+static BITMAPINFO CaptureInfo
+static i32 CaptureWidth
+static i32 CaptureHeight
+void AppendNumber(char* buffer, i32 value)
+void DumpInfo(HWND Window, const char* path)
+BOOL CaptureWindowPixels(HWND Window, const char* path)
+void DumpBegin(LPSTR commandLine)
+void DumpTick(HWND Window)

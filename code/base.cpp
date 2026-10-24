@@ -389,11 +389,29 @@ static bool PrevF5 = false;
 static bool PrevF = false;
 static bool PrevEscape = false;
 
+// Every place that stops capturing calls this, so the ShowCursor counter always
+// gets its one matching TRUE back.
+void ReleaseMouseCapture()
+{
+    if (!MouseCaptured) return;
+    MouseCaptured = false;
+    ShowCursor(TRUE);
+}
+
 void PollInput()
 {
     // Only the focused window reads input; everything else is treated as "nothing pressed".
+    // Alt+Tabbing away also gives the cursor back instead of leaving it hidden.
     if (GetForegroundWindow() != GlobalWindow)
     {
+        ReleaseMouseCapture();
+        PrevLmb = false;
+        PrevRmb = false;
+        PrevF3 = false;
+        PrevF5 = false;
+        PrevF = false;
+        PrevEscape = false;
+
         In.w = false;
         In.a = false;
         In.s = false;
@@ -516,7 +534,6 @@ void PollInput()
 
     if (MouseCaptured && escapePressed)
     {
-        MouseCaptured = false;
-        ShowCursor(TRUE);
+        ReleaseMouseCapture();
     }
 }
