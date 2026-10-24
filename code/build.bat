@@ -15,5 +15,5 @@ exit /b 1
 :build
 if not exist ..\build mkdir ..\build
 pushd ..\build
-cl -FC -Zi ..\code\win32_handmade.cpp user32.lib
+cl -FC -Zi -Od -W3 ..\code\main.cpp user32.lib gdi32.lib /Fe:..\build\mc.exe
 popd
