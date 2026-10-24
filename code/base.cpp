@@ -368,3 +368,155 @@ m4 M4View(v3 pos, f32 yaw, f32 pitch)
 
     return result;
 }
+
+// --- Input (step 4) ---
+struct Input
+{
+    bool w, a, s, d, up, down, left, right, space, ctrl, shift, escape, lmb, rmb;
+    bool lmbPressed, rmbPressed;
+    bool f3, f3Pressed, f5Pressed, t, f, fPressed;
+    bool keyNum[5];
+    i32 mouseDX, mouseDY;
+};
+
+Input In;
+bool MouseCaptured = false;
+
+static bool PrevLmb = false;
+static bool PrevRmb = false;
+static bool PrevF3 = false;
+static bool PrevF5 = false;
+static bool PrevF = false;
+static bool PrevEscape = false;
+
+void PollInput()
+{
+    // Only the focused window reads input; everything else is treated as "nothing pressed".
+    if (GetForegroundWindow() != GlobalWindow)
+    {
+        In.w = false;
+        In.a = false;
+        In.s = false;
+        In.d = false;
+        In.up = false;
+        In.down = false;
+        In.left = false;
+        In.right = false;
+        In.space = false;
+        In.ctrl = false;
+        In.shift = false;
+        In.escape = false;
+        In.lmb = false;
+        In.rmb = false;
+        In.lmbPressed = false;
+        In.rmbPressed = false;
+        In.f3 = false;
+        In.f3Pressed = false;
+        In.f5Pressed = false;
+        In.t = false;
+        In.f = false;
+        In.fPressed = false;
+        In.keyNum[0] = false;
+        In.keyNum[1] = false;
+        In.keyNum[2] = false;
+        In.keyNum[3] = false;
+        In.keyNum[4] = false;
+        In.mouseDX = 0;
+        In.mouseDY = 0;
+        return;
+    }
+
+    bool wDown = (GetAsyncKeyState('W') & 0x8000) != 0;
+    bool aDown = (GetAsyncKeyState('A') & 0x8000) != 0;
+    bool sDown = (GetAsyncKeyState('S') & 0x8000) != 0;
+    bool dDown = (GetAsyncKeyState('D') & 0x8000) != 0;
+    bool upDown = (GetAsyncKeyState(VK_UP) & 0x8000) != 0;
+    bool downDown = (GetAsyncKeyState(VK_DOWN) & 0x8000) != 0;
+    bool leftDown = (GetAsyncKeyState(VK_LEFT) & 0x8000) != 0;
+    bool rightDown = (GetAsyncKeyState(VK_RIGHT) & 0x8000) != 0;
+    bool spaceDown = (GetAsyncKeyState(VK_SPACE) & 0x8000) != 0;
+    bool ctrlDown = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
+    bool shiftDown = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+    bool escapeDown = (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0;
+    bool lmbDown = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
+    bool rmbDown = (GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0;
+    bool f3Down = (GetAsyncKeyState(VK_F3) & 0x8000) != 0;
+    bool f5Down = (GetAsyncKeyState(VK_F5) & 0x8000) != 0;
+    bool tDown = (GetAsyncKeyState('T') & 0x8000) != 0;
+    bool fDown = (GetAsyncKeyState('F') & 0x8000) != 0;
+
+    In.w = wDown;
+    In.a = aDown;
+    In.s = sDown;
+    In.d = dDown;
+    In.up = upDown;
+    In.down = downDown;
+    In.left = leftDown;
+    In.right = rightDown;
+    In.space = spaceDown;
+    In.ctrl = ctrlDown;
+    In.shift = shiftDown;
+    In.escape = escapeDown;
+    In.lmb = lmbDown;
+    In.rmb = rmbDown;
+    In.f3 = f3Down;
+    In.t = tDown;
+    In.f = fDown;
+
+    In.lmbPressed = lmbDown && !PrevLmb;
+    In.rmbPressed = rmbDown && !PrevRmb;
+    In.f3Pressed = f3Down && !PrevF3;
+    In.f5Pressed = f5Down && !PrevF5;
+    In.fPressed = fDown && !PrevF;
+
+    PrevLmb = lmbDown;
+    PrevRmb = rmbDown;
+    PrevF3 = f3Down;
+    PrevF5 = f5Down;
+    PrevF = fDown;
+
+    In.keyNum[0] = (GetAsyncKeyState('1') & 0x8000) != 0;
+    In.keyNum[1] = (GetAsyncKeyState('2') & 0x8000) != 0;
+    In.keyNum[2] = (GetAsyncKeyState('3') & 0x8000) != 0;
+    In.keyNum[3] = (GetAsyncKeyState('4') & 0x8000) != 0;
+    In.keyNum[4] = (GetAsyncKeyState('5') & 0x8000) != 0;
+
+    bool escapePressed = escapeDown && !PrevEscape;
+    PrevEscape = escapeDown;
+
+    if (MouseCaptured)
+    {
+        // Centre of the client area, in screen coordinates.
+        RECT ClientRect;
+        GetClientRect(GlobalWindow, &ClientRect);
+        POINT Center;
+        Center.x = (ClientRect.right - ClientRect.left) / 2;
+        Center.y = (ClientRect.bottom - ClientRect.top) / 2;
+        ClientToScreen(GlobalWindow, &Center);
+
+        POINT Cursor;
+        GetCursorPos(&Cursor);
+
+        In.mouseDX = Cursor.x - Center.x;
+        In.mouseDY = Cursor.y - Center.y;
+
+        SetCursorPos(Center.x, Center.y);
+    }
+    else
+    {
+        In.mouseDX = 0;
+        In.mouseDY = 0;
+    }
+
+    if (!MouseCaptured && In.lmbPressed)
+    {
+        MouseCaptured = true;
+        ShowCursor(FALSE);
+    }
+
+    if (MouseCaptured && escapePressed)
+    {
+        MouseCaptured = false;
+        ShowCursor(TRUE);
+    }
+}

@@ -1,6 +1,7 @@
 // main.cpp - the single translation unit. Own file includes only, in order.
 #include <windows.h>
 #include "base.cpp"
+#include "raster.cpp"
 
 static BOOL Running = TRUE;
 static HWND MainWindow = 0;
@@ -60,20 +61,81 @@ void FillGradient(u32 blue)
     }
 }
 
-// --- Temporary test for step 3 math (remove later; values x1000 so the title can hold them) ---
-void ShowMathTest()
+// --- Temporary test for step 4 input ---
+static f32 SquareX = 150.0f;
+static f32 SquareY = 85.0f;
+
+void UpdateAndDrawTestSquare()
 {
-    DebugSet(1, "SQRT2", (i32)(Sqrt(2.0f) * 1000.0f));
-    DebugSet(2, "SIN", (i32)(Sin(PI * 0.5f) * 1000.0f));
-    DebugSet(3, "COS", (i32)(Cos(PI) * 1000.0f));
+    const f32 SQUARE_SPEED = 100.0f; // pixels per second
+    const i32 SQUARE_SIZE = 10;
 
-    m4 viewMatrix = M4View(V3(0.0f, 0.0f, 0.0f), 0.0f, 0.0f);
-    v4 viewResult = M4MulV4(viewMatrix, V4(0.0f, 0.0f, 5.0f, 1.0f));
-    DebugSet(4, "VIEWZ", (i32)(viewResult.z * 1000.0f));
+    if (In.w) SquareY -= SQUARE_SPEED * Dt;
+    if (In.s) SquareY += SQUARE_SPEED * Dt;
+    if (In.a) SquareX -= SQUARE_SPEED * Dt;
+    if (In.d) SquareX += SQUARE_SPEED * Dt;
 
-    m4 projectionMatrix = M4Perspective(1.2f, 1.77f);
-    v4 projectionResult = M4MulV4(projectionMatrix, V4(0.0f, 0.0f, 5.0f, 1.0f));
-    DebugSet(5, "PROJW", (i32)(projectionResult.w * 1000.0f));
+    DebugSet(1, "MOUSEX", In.mouseDX);
+    DebugSet(2, "MOUSEY", In.mouseDY);
+
+    i32 left = FloorI(SquareX);
+    i32 top = FloorI(SquareY);
+
+    for (i32 y = 0; y < SQUARE_SIZE; ++y)
+    {
+        for (i32 x = 0; x < SQUARE_SIZE; ++x)
+        {
+            PutPixel(left + x, top + y, MakeColor(255, 255, 255));
+        }
+    }
+}
+
+// --- Temporary test for step 6: depth buffer ---
+static ScreenVert RotateScreenVert(ScreenVert v, f32 centerX, f32 centerY, f32 angle)
+{
+    ScreenVert result;
+    result.x = centerX + Cos(angle) * (v.x - centerX) - Sin(angle) * (v.y - centerY);
+    result.y = centerY + Sin(angle) * (v.x - centerX) + Cos(angle) * (v.y - centerY);
+    result.invW = v.invW;
+    return result;
+}
+
+void DrawTestTriangles()
+{
+    // Triangle A: a wide triangle, all three vertices invW = 0.2.
+    ScreenVert A1 = { 100.0f, 40.0f, 0.2f };
+    ScreenVert A2 = { 220.0f, 40.0f, 0.2f };
+    ScreenVert A3 = { 160.0f, 120.0f, 0.2f };
+
+    // Triangle B: the same shape rotated about its centre so it overlaps A, slanting in
+    // depth: one vertex invW = 0.1 (farther than A), the other two invW = 0.4 (nearer).
+    f32 centreX = (100.0f + 220.0f + 160.0f) / 3.0f;
+    f32 centreY = (40.0f + 40.0f + 120.0f) / 3.0f;
+    f32 angle = 0.35f;
+
+    ScreenVert B1 = RotateScreenVert(A1, centreX, centreY, angle);
+    ScreenVert B2 = RotateScreenVert(A2, centreX, centreY, angle);
+    ScreenVert B3 = RotateScreenVert(A3, centreX, centreY, angle);
+    B1.invW = 0.1f;
+    B2.invW = 0.4f;
+    B3.invW = 0.4f;
+
+    // Normal order: B first, then A. Holding SPACE swaps the order, so the depth test
+    // decides who wins instead of the draw order.
+    if (In.space)
+    {
+        DS.FlatColor = MakeColor(255, 0, 0);
+        RasterTriangle(A1, A2, A3);
+        DS.FlatColor = MakeColor(0, 0, 255);
+        RasterTriangle(B1, B2, B3);
+    }
+    else
+    {
+        DS.FlatColor = MakeColor(0, 0, 255);
+        RasterTriangle(B1, B2, B3);
+        DS.FlatColor = MakeColor(255, 0, 0);
+        RasterTriangle(A1, A2, A3);
+    }
 }
 
 void PresentBackbuffer(HWND Window)
@@ -180,6 +242,14 @@ void RunOneFrame()
     static f32 FPSTimer = 0.0f;
     static f32 FlushTimer = 0.0f;
     static i32 FramesInWindow = 0;
+    static bool PrevEscapeForClose = false;
+
+    // Whether the mouse was captured at the start of this frame, before PollInput
+    // can release it. ESC while captured only releases the mouse; ESC while not
+    // captured closes the window.
+    bool wasCaptured = MouseCaptured;
+
+    PollInput();
 
     MSG Message;
     while (PeekMessageA(&Message, 0, 0, 0, PM_REMOVE))
@@ -215,7 +285,10 @@ void RunOneFrame()
         FlushTimer = 0.0f;
     }
 
-    if (!DumpMode && (GetAsyncKeyState(VK_ESCAPE) & 0x8000))
+    bool escapePressedForClose = In.escape && !PrevEscapeForClose;
+    PrevEscapeForClose = In.escape;
+
+    if (!DumpMode && !wasCaptured && escapePressedForClose)
     {
         PostMessageA(MainWindow, WM_CLOSE, 0, 0);
         Running = FALSE;
@@ -223,7 +296,9 @@ void RunOneFrame()
 
     ++FrameCounter;
     FillGradient(u32(FrameCounter));
-    ShowMathTest();
+    ClearDepth();
+    DrawTestTriangles();
+    UpdateAndDrawTestSquare();
     PresentBackbuffer(MainWindow);
 
     DumpTick(MainWindow);
