@@ -2,6 +2,7 @@
 #include <windows.h>
 #include "base.cpp"
 #include "raster.cpp"
+#include "player.cpp"
 
 static BOOL Running = TRUE;
 static HWND MainWindow = 0;
@@ -100,27 +101,26 @@ LRESULT CALLBACK WindowCallback(HWND Window, UINT Message, WPARAM WParam, LPARAM
     return Result;
 }
 
-// --- Step 7: camera turning and the 3D test scene ---
-const f32 CAMERA_TURN_SPEED = 1.5f; // radians per second
-
-void UpdateCameraWithArrowKeys()
+// --- Step 10: the cube test scene replaces the step 7/9 triangles ---
+void DrawTestCubes()
 {
-    if (In.left) Cam.yaw -= CAMERA_TURN_SPEED * Dt;
-    if (In.right) Cam.yaw += CAMERA_TURN_SPEED * Dt;
-    if (In.up) Cam.pitch += CAMERA_TURN_SPEED * Dt;
-    if (In.down) Cam.pitch -= CAMERA_TURN_SPEED * Dt;
+    const u32 green = MakeColor(60, 180, 60);
+    const u32 brown = MakeColor(120, 84, 52);
 
-    Cam.pitch = Clamp(Cam.pitch, -1.5f, 1.5f);
+    // 5x5 floor of green cubes, one unit tall, so the near-plane clip from step 9 still gets
+    // exercised when the camera flies past the cubes.
+    for (i32 x = 0; x < 5; ++x)
+    {
+        for (i32 z = 0; z < 5; ++z)
+        {
+            DrawCube(x, 0, z, green);
+        }
+    }
 
-    DebugSet(1, "YAW", i32(Cam.yaw * 1000.0f));
-}
-
-void DrawTestTriangles3D()
-{
-    DrawTriangle3D(V3(-2.0f, 0.0f, 0.0f), V3(2.0f, 0.0f, 0.0f), V3(0.0f, 3.0f, 0.0f),
-                   MakeColor(255, 160, 0));
-    DrawTriangle3D(V3(-1.0f, 0.0f, -1.0f), V3(1.0f, 0.0f, 1.0f), V3(0.0f, 2.0f, 0.0f),
-                   MakeColor(0, 200, 200));
+    // Stack of 3 brown cubes on top of the floor.
+    DrawCube(2, 1, 2, brown);
+    DrawCube(2, 2, 2, brown);
+    DrawCube(2, 3, 2, brown);
 }
 
 void PresentBackbuffer(HWND Window)
@@ -273,7 +273,7 @@ void RunOneFrame()
         return;
     }
 
-    UpdateCameraWithArrowKeys();
+    UpdateFlyCamera();
 
     FlushTimer += Dt;
     if (FlushTimer >= 0.25f)
@@ -289,7 +289,7 @@ void RunOneFrame()
     SetupCamera();
     ClearScreen(MakeColor(120, 170, 230));
     ClearDepth();
-    DrawTestTriangles3D();
+    DrawTestCubes();
     PresentBackbuffer(MainWindow);
 
     // Measured work, not just the frame interval: with --nocap this is the real render
@@ -366,10 +366,6 @@ int CALLBACK WinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPSTR CommandLi
 
     GlobalWindow = MainWindow;
 
-    // The step 4 test wrote MOUSEX/MOUSEY into slots 1 and 2 and step 7 removes that test.
-    // DebugFlush prints every slot whose label is not 0, so clear slot 2 once here.
-    DebugSet(2, 0, 0);
-
     // CS_OWNDC gives this window one permanent device context; grab it once.
     WindowDC = GetDC(MainWindow);
 
@@ -381,6 +377,11 @@ int CALLBACK WinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPSTR CommandLi
     ScreenBitmapInfo.bmiHeader.biPlanes = 1;
     ScreenBitmapInfo.bmiHeader.biBitCount = 32;
     ScreenBitmapInfo.bmiHeader.biCompression = BI_RGB;
+
+    // Step 10 test scene: the cubes sit at x,z 0..4 and the stack at (2, 1..3, 2), so the
+    // camera starts looking at them from (2.5, 3, -6). Cam's initializer in raster.cpp stays
+    // the spec's literal value; this is the test scene setting the start position.
+    Cam.pos = V3(2.5f, 3.0f, -6.0f);
 
     // Frame pacing: cap the loop at TARGET_FPS instead of running flat out.
     PacingSetup();

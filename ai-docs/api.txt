@@ -1,4 +1,4 @@
-# API.txt — gerado depois do Step 7 passar (prompt de API do pack)
+# API.txt — gerado depois do Step 9 passar (prompt de API do pack)
 # Assinaturas apenas, sem corpo, agrupado por arquivo.
 
 ## base.cpp
@@ -88,7 +88,17 @@ Camera Cam = { {0.0f, 1.0f, -6.0f}, 0.0f, 0.0f }
 m4 GViewProj
 void SetupCamera()
 ScreenVert ProjectToScreen(v4 clip)
+struct ClipVert { v4 pos; f32 u; f32 v; }
+v4 LerpV4(v4 a, v4 b, f32 t)
+i32 ClipPolygonNear(ClipVert* in, i32 inCount, ClipVert* out)
+void DrawClipTriangle(ClipVert a, ClipVert b, ClipVert c)
 void DrawTriangle3D(v3 a, v3 b, v3 c, u32 color)
+
+## player.cpp
+f32 MoveSpeed = 10.0f
+f32 MouseSens = 0.0025f
+const f32 CAMERA_TURN_SPEED = 1.5f
+void UpdateFlyCamera()
 
 ## main.cpp
 static BOOL Running
@@ -102,8 +112,7 @@ void DumpTick(HWND Window)
 void PresentBackbuffer(HWND Window)
 bool CommandLineHas(LPSTR commandLine, const char* flag)
 LRESULT CALLBACK WindowCallback(HWND Window, UINT Message, WPARAM WParam, LPARAM LParam)
-const f32 CAMERA_TURN_SPEED = 1.5f
-void UpdateCameraWithArrowKeys()
+void DrawTestFloorTriangle()
 void DrawTestTriangles3D()
 void PresentBackbuffer(HWND Window)
 const i32 TARGET_FPS = 60

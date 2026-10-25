@@ -261,12 +261,189 @@ sem efeito no engine.
 
 `ai-docs\api.txt` gerado com o prompt de API do pack (assinaturas de `base.cpp`, `raster.cpp`, `main.cpp`).
 
+## Step 8 — Câmera free-fly (`player.cpp` novo, `main.cpp`) — APROVADO (checks passaram)
+Plano: `ai-docs\step8_plan.md`. Spec: `qwen_prompt_pack.md` Step 8.
+
+`player.cpp` (novo, incluído no fim da lista de includes de `main.cpp`, depois de `raster.cpp`):
+- `f32 MoveSpeed = 10.0f; f32 MouseSens = 0.0025f;` e `const f32 CAMERA_TURN_SPEED = 1.5f;` (a const saiu de
+  `main.cpp`, porque a regra das setas agora vive dentro de `UpdateFlyCamera`)
+- `UpdateFlyCamera()`:
+  - `MouseCaptured` → `Cam.yaw += In.mouseDX*MouseSens; Cam.pitch -= In.mouseDY*MouseSens;` (cursor à direita
+    gira para a direita; cursor acima do centro olha para cima), depois `Clamp(Cam.pitch, -1.5f, 1.5f)`
+  - setas seguem girando a `CAMERA_TURN_SPEED * Dt` (yaw ±, pitch ±), com o mesmo clamp
+  - `forwardFlat = V3(Sin(yaw), 0, Cos(yaw))`, `rightFlat = V3(Cos(yaw), 0, -Sin(yaw))`; W/S ao longo de
+    `forwardFlat`, D/A ao longo de `rightFlat`, `Space` soma +Y, `Ctrl` soma −Y
+  - `speed = MoveSpeed`, `*= 2.0f` com `Shift`; se `V3Len(wish) > 0` → `Cam.pos += V3Scale(V3Norm(wish), speed*Dt)`
+  - `DebugSet(1,"X")`, `DebugSet(2,"Y")`, `DebugSet(3,"Z")` = `Cam.pos` ×1000
+
+`main.cpp`:
+- `#include "player.cpp"` no fim da lista; removidos `UpdateCameraWithArrowKeys()` e `const CAMERA_TURN_SPEED`
+- `RunOneFrame`: `UpdateFlyCamera()` no lugar das setas antigas (mesma posição: depois do bloco do ESC, antes
+  do `FlushTimer`, antes de `SetupCamera()`)
+- removido `DebugSet(2, 0, 0)` em `WinMain` (era para limpar o label `MOUSEX` sobrando do Step 4; os slots
+  1..3 passaram a ser escritos todo frame)
+- título final: `FPS | X | Y | Z | US` (slots 4..6 vazios; `US` sai só no Step 35)
+
+Ferramenta de análise (não é código do engine): durante a auditoria `DebugSet(4,"YAW")` e `DebugSet(5,"PITCH")`
+foram adicionados temporariamente em `player.cpp` para medir a direção do mouse e o clamp do pitch, e
+**removidos** depois — o código final só tem os slots do spec. Scripts: `step8_audit.ps1` (teclado, mouse,
+clamp, regressão), `step8_dump.ps1` (imagens e bounding boxes), `step8_final.ps1`, `step8_nocap.ps1`.
+
+Medições (runs vivos lendo o título a cada 120 ms; segurar 1,4 s = Δ medido sobre a janela de flush de 0,25 s):
+- velocidade: W `dZ=+15320` (10,94 unidades/s), S `dZ=-14156` (10,11), D `dX=+15154` (10,82),
+  A `dX=-15310` (10,94), Space `dY=+14187` (10,13), Ctrl `dY=-15343` (10,96) → `MoveSpeed` 10 nos 6 sentidos,
+  sinais corretos; sem tecla `|d| = 0,00` unidades (a cena não anda sozinha)
+- `Shift+W` = 20,20 unidades/s (dobrado ✓); `W+D` = 10,89 unidades/s com `dX=dZ=10779` → diagonal
+  normalizada, não 14,1 ✓
+- relativo ao olhar: segurando RIGHT 400 ms o yaw ficou 0,784 rad; depois W deu `dX=5406 dZ=5412` →
+  `dX/dZ = 1,00 = tan(yaw)` exatamente ✓ (anda na direção que você olha, não no eixo do mundo)
+- mouse look (click captura): nudge de 40 px por 400 ms → `YAW 0 → 1300` (0,1 rad por poll = 40×0,0025 ✓),
+  pitch 0; nudge vertical −40 → `PITCH 0 → 1300` (+ = olhar para cima ✓); +40 → `PITCH 1300 → 99` (− ✓)
+- clamp do pitch: mouse −400 px segurando 600 ms → **máximo exato 1500**, nunca acima; +400 → **mínimo
+  exato −1500**; setas em processos novos: UP 2 s → máximo 1500, DOWN 2 s → mínimo −1500
+- captura continua viva com WASD/setas: segurando W com o mouse capturado `dX=7465 dZ=2073` com yaw 1,3 rad
+  (mesma regra do olhar); RIGHT com o mouse capturado → `YAW 1300 → 2075` (setas seguem funcionando)
+- 1º ESC devolve o cursor (flags 1), janela viva, cursor livre e a câmera **para** de girar (yaw stayed 2075);
+  2º ESC fecha com exit code 0
+- imagens (`--dump`, segurar 200 ms e soltar, cena estável no 2º quadro), comparação com o Step 7
+  (laranja x 118–201 y 48–110):
+
+  | quadro | posição no título | laranja na tela |
+  |---|---|---|
+  | base | `X 0 Y 1000 Z -6000` | x 118–201 y 48–110 (idêntico ao Step 7) |
+  | W 200 ms | z −6000 → −3860 | x 94–225 y 24–122 (cresce, objetos mais perto) |
+  | S 200 ms | z −6000 → −8041 | x 128–191 y 59–105 (encolhe) |
+  | D 200 ms | x 0 → 2012 | minX 118 → 75 (deslizam para a **esquerda**) |
+  | A 200 ms | x 0 → −2170 | maxX 201 → 248 (espelho de D) |
+  | Space 200 ms | y 1000 → 3019 | y 48–110 → 91–154 (descem na tela) |
+  | Ctrl 200 ms | y 1000 → −1169 | y 48–110 → 1–64 (sobem na tela) |
+  | mouse right | yaw 0 → 699 | minX 118 → 0, maxX 201 → 108 (deslizam para a esquerda) |
+  | mouse up | pitch 0 → 699 | y 48–110 → 142–179 (descem na tela) |
+
+- paleta em todos os quadros: **distinct = 3** (`78AAE6` céu, `FFA000` laranja, `00C8C8` ciano),
+  57.600/57.600 px cobertos pelas 3 cores → nada de interpolação, nada de pixel fora da paleta
+- builds debug e release: 0 erros, 0 warnings (`/W3`); debug `FPS: 60 | US: 1775`; release `--dump`
+  `FPS: 59 | US: 474`; release `--nocap --dump` `FPS: 1873 | US: 506` → o custo da câmera é desprezível
+  (Step 7 era US 492 / FPS 1943)
+- todos os runs fecham com exit code 0; `lingering mc processes: 0`
+
+## Step 9 — Near-plane clipping (`raster.cpp`, `main.cpp`) — APROVADO (checks passaram)
+Spec: `qwen_prompt_pack.md` Step 9. Só `raster.cpp` e `main.cpp` foram editados; nenhum `#include` novo.
+
+`raster.cpp` (depois de `ProjectToScreen`, antes de `DrawTriangle3D`):
+- `struct ClipVert { v4 pos; f32 u; f32 v; }` — `u`/`v` ainda não usados, mas o corte precisa
+  interpolá-los para o Step 11
+- `v4 LerpV4(v4 a, v4 b, f32 t)` — interpola x, y, z, w com `Lerp` de `base.cpp`
+- `i32 ClipPolygonNear(ClipVert* in, i32 inCount, ClipVert* out)` — Sutherland-Hodgman contra
+  `w = NEAR_W`: `curInside = cur.pos.w >= NEAR_W`; se `curInside` copia `cur`; se os lados diferem,
+  `t = (NEAR_W - cur.pos.w) / (next.pos.w - cur.pos.w)`, interpola **todos** os campos
+  (`LerpV4` + `Lerp` em `u`/`v`) e depois força `hit.pos.w = NEAR_W` exato; retorna o total
+- `void DrawClipTriangle(ClipVert a, ClipVert b, ClipVert c)` — `poly[3]`, `clipped[8]`,
+  `count = ClipPolygonNear(poly, 3, clipped)`, `if (count < 3) return`, fan `k = 1..count-2` a
+  partir de `clipped[0]` (o polígono fica convexo depois do corte do plano near), cada fatia em
+  `ProjectToScreen` + `RasterTriangle` (cor vem de `DS.FlatColor`, depth test igual)
+- `DrawTriangle3D`: agora constrói 3 `ClipVert` (`pos = M4MulV4(GViewProj, V4(...,1))`, `u = v = 0`)
+  e chama `DrawClipTriangle`; o teste `w < NEAR_W` que descartava o triângulo inteiro saiu
+
+`main.cpp`:
+- `DrawTestFloorTriangle()` — `DrawTriangle3D(V3(-50,-1,-50), V3(50,-1,-50), V3(0,-1,100), MakeColor(60,180,60))`
+- `RunOneFrame` desenho: `ClearScreen(céu) → ClearDepth() → DrawTestFloorTriangle() → DrawTestTriangles3D()`
+  (piso antes dos triângulos de teste, para os triângulos ficarem por cima quando se sobrepõem)
+
+Regressão do Step 7 comprovada pelo próprio dump: com o descarte por vértice do Step 7, o dump base
+(cam 0,1,-6) tinha **3 cores** — 2.237 px laranja + 556 px ciano e nenhum verde — porque o piso
+verde tinha um vértice atrás da near plane: `(-50,-1,-50)` dá `w = -46` (câmera em z = -6), enquanto
+`(0,-1,100)` dá `w = 106`, então o triângulo inteiro era jogado fora. Agora o mesmo quadro tem
+**4 cores** e 25.215 px de verde `3CB43C`, com os triângulos de teste idênticos aos do Step 7
+(laranja x 118–201 y 48–110 = 2.237 px, ciano x 134–159 y 69–115 = 556 px).
+
+Referência independente em C# (`step9_ref.ps1`, `Add-Type`, dupla precisão): reimplementa
+`M4Perspective`/`M4View`/`M4Mul`/`M4MulV4`/`ClipPolygonNear`/`ProjectToScreen`/`RasterTriangle`
+com a mesma regra de winding, bounding box clampado e depth por `invW`, e compara o histograma de
+cores do dump do engine. Câmera vem do título do dump (X/Y/Z ÷1000), só nos runs sem setas (yaw = pitch = 0):
+
+| run | câmera | engine (verde / laranja / ciano / céu) | referência | diff máx por cor |
+|---|---|---|---|---|
+| start | (0, 1, -6) | 25215 / 2237 / 556 / 29592 | 25215 / 2237 / 556 / 29592 | 0 px |
+| low | (0, -0.812, -6) | 28582 / 2224 / 565 / 26229 | 28582 / 2224 / 565 / 26229 | 0 px |
+| plane | (0, -1.149, -6) | 28630 / 0 / 0 / 28970 | 28632 / 0 / 0 / 28968 | 2 px |
+| below | (0, -3.178, -6) | 26378 / 0 / 0 / 31222 | 26378 / 0 / 0 / 31222 | 0 px |
+| forward_low | (0, -0.488, -2.798) | 28206 / 6414 / 3095 / 19885 | 28204 / 6412 / 3099 / 19885 | 4 px |
+| past_objects | (0, -0.49, 0.41) | 28174 / 0 / 0 / 29426 | 28190 / 0 / 0 / 29410 | 16 px |
+| below_forward | (0, -2.684, -4.998) | 26880 / 0 / 0 / 30720 | 26910 / 0 / 0 / 30690 | 30 px |
+| space_up | (0, 4.204, -6) | 20278 / 2344 / 386 / 34592 | 20280 / 2344 / 386 / 34590 | 2 px |
+
+`other = 0` em todos os runs (nenhum pixel fora das 4 cores da cena). As diferenças de 0–30 px são
+de borda: o engine é `f32` com as séries de `Sin`/`Cos` de `base.cpp`, a referência é `double` — nas
+posições exatas (start/below) bate 0 px.
+
+Invariantes nos 12 runs `--dump` (`step9_dump2.ps1`, teclas seguradas e **soltes** antes do tick de
+dump, +240 ms de settle para o título e o quadro descreverem a mesma câmera):
+- piso/scene visível em todos os runs: mínimo 14.696 px não-céu (`look_up`, a câmera olha para cima)
+- paleta nunca passa das 4 cores da cena (max distinct = 4); `plane`/`below`/`past_objects`/`edge_on`
+  ficam com 2 cores só (céu + verde), sem laranja/ciano quando os triângulos ficam atrás/atrasados
+- nenhum pixel fora de 0..319 × 0..179 (0 runs ruins) → nenhum triângulo gigante lixo, nenhum NaN
+- todos os 12 runs fecham com exit code 0; foreground em todos os runs; `lingering mc processes: 0`
+- sem flicker: quadros settled byte-idênticos quando o segundo tick de dump existe (`start`,
+  `below`, `edge_on`, `space_up` = True). O tick de 1,5 s às vezes não grava (`SecondsSinceDump`
+  cai logo abaixo de 0,5 e o `WM_CLOSE` do self-close fecha o processo), então nesses runs só há
+  1 quadro — reportado explicitamente como `2nd dump tick present: False`
+- fly-through vivo (sem `--dump`), Ctrl 350 ms depois Shift+W 2,5 s: `fps min 59 max 60`,
+  `us max 6450`, 20 amostras com a câmera abaixo do plano do piso (y < -1000), z de -6000 a 37872,
+  16 amostras com z ≥ 0 (passando pelos triângulos de teste) → atravessou o piso e os objetos sem
+  travar e sem cair o fps; exit 0
+- builds debug e release: 0 erros, 0 warnings (`/W3`); debug `--dump` `FPS: 59–60 | US ~5.700–6.300`
+  (Step 8 era US 1775 — o piso verde + clipping custa ~4 ms/frame no debug); release medido no Step 10
+
+Ferramenta de análise (não é código do engine): `step9_dump2.ps1` (runs settled, histograma, bbox,
+fly-through), `step9_ref.ps1` (rasterizador de referência em C#), `step9_sizes.ps1`,
+`bmp2png.ps1` (bmp → png para o Review pane). O reference C# usa `(r << 16) | (g << 8) | b` com
+parênteses completos (PS 5.1 + C# interpreta `==` antes de `|` sem parênteses).
+
+## Step 10 — Cubes with shading (`raster.cpp`, `main.cpp`) — IMPLEMENTADO, auditoria PENDENTE (parado a pedido seu)
+
+Feito:
+- Código em `raster.cpp`: `FaceNormal[6]`, `FaceCorner[6][4][3]`, `FaceShade[6]`, `ScaleColor`,
+  `DrawQuad`, `DrawBlockFace` (culta por `dot <= 0`), `DrawCube`. Em `main.cpp`: `DrawTestCubes`
+  (chão 5x5 verde em x,z 0..4 y=0 + torre marrom em (2,1..3,2)), ordem de frame,
+  `Cam.pos = V3(2.5, 3.0, -6.0)` em `WinMain`. Os triângulos do Step 7/9 foram substituídos pela
+  cena de cubos.
+- `build.bat` debug (`/Zi -Od -W3`) e release (`-O2 -fp:fast`): 0 erros, 0 warnings.
+- Paleta exata do engine medida com `shade_probe.cpp` sob as mesmas flags: verde top 60,180,60 /
+  side 48,144,48 / end 39,116,39 / bottom 30,90,30; marrom top 120,84,52 / side 96,67,41 /
+  end 78,54,33 / bottom 60,42,26 (multiplicação em f32 + truncamento, não arredondamento).
+- 11 dumps novos (`step10_dump.ps1`) passam os invariantes: px fora da paleta = 0, buracos de céu
+  = 0, bbox dentro da tela, exit 0, distinct máximo 4; abaixo do chão mostra 30,90,30 e não mostra
+  o top verde; ordenação de shading top > side/end > bottom confirmada. Fly-through 2.5 s:
+  fps min 42, max 60, exit 0.
+
+Faltando (é aqui que parei):
+1. **Título dessincronizado do frame dumpado.** `DebugFlush` só roda a cada 0.25 s (`main.cpp`
+   linha 279), então num run que segura setas o `dump_info.txt` traz yaw/pitch velhos de até 0.25 s
+   enquanto o bmp é do frame atual. Prova: o reference C# bate com o geom do engine exatamente só
+   nos runs com camera parado (`front`, `graze_low`, `below_floor`, `close_clip`, `past_cubes`,
+   `inside_field` = 0 px de diferença); nos runs em turno a diferença é 1051..4233 px
+   (`az_right`, `az_left`, `az_back`, `top_down`) e 16 px em `space_up` (movimento ainda ativo).
+   Correção planejada: liberar as teclas antes de ~0.75 s (turn 1.5 rad/s, move 10 m/s,
+   sprint 20 m/s) e aceitar só dumps cujo `LastWriteTime` seja ≥ liberação + 260 ms, o que garante
+   um `DebugFlush` já com camera parado.
+2. `step10_ref.ps1` precisa ser re-executado contra os dumps settled. A regex de `bbox` do parser
+   do reference não casa com o formato do texto (só cosmético: geom e cores são lidos certos).
+3. PNGs das cenas ainda não mostrados no Review pane (`s10_*.png` já gerados).
+4. Entradas de auditoria ainda no código: `DebugSet(4, "YAW")` e `DebugSet(5, "PITCH")` em
+   `player.cpp` (linhas 55-58, ANALYSIS ONLY) — remover depois do check como no Step 8, rebuildar
+   debug + release e re-medir FPS/US com `--dump` e `--nocap --dump`.
+5. Entrada do Step 10 no `progresso.md` com as tabelas finais, e `ai-docs\api.txt` ainda diz
+   "Step 9" — regenerar para "Step 10" com as assinaturas novas de `raster.cpp`/`main.cpp`.
+
 ## Próximo passo
-Step 8 — Câmera free-fly (`player.cpp` novo, `main.cpp`): `MoveSpeed = 10.0f`, `MouseSens = 0.0025f`,
-`UpdateFlyCamera()` (mouse capturado gira com `In.mouseDX/DY`; setas continuam a 1.5 rad/s × `Dt`,
-pitch clamp ±1.5; WASD no plano XZ, `Space` sobe, `Ctrl` desce, `Shift` ×2, normaliza a direção e
-multiplica por `MoveSpeed*Dt`); criar `player.cpp` e incluir no fim da lista de includes de `main.cpp`;
-chamar `UpdateFlyCamera()` antes de `SetupCamera()`, substituindo `UpdateCameraWithArrowKeys()`;
-slots 1–3 = `Cam.pos` x, y, z ×1000. Check: click captura, mouse gira naturalmente, WASD relativo ao
-que você olha, Space/Ctrl sobem/descem. O slot 2 fica livre (`DebugSet(2, 0, 0)` continua válido).
+Termizar a auditoria do Step 10 (itens 1-5 acima), depois Step 11 — UVs e blocos pintados
+(`base.cpp`, `raster.cpp`, `main.cpp`): enum `AIR/GRASS/DIRT/WOOD/WATER/LEAVES`;
+`ScreenVert { x, y, invW, uw, vw }`; `ProjectToScreen(ClipVert)` com `uw = cv.u*invW`,
+`vw = cv.v*invW`; `RasterTriangle` interpola `uw`/`vw` com os mesmos pesos de `invW` e chama
+`ShadePixel(invW, u, v)`; `DrawState { FlatColor; Block; Face; Shade }` (`Block == 0` = FlatColor);
+`DrawQuadUV` com UVs (0,0)(1,0)(1,1)(0,1); `Hash3`; `PaintBlock(block, face, pu, pv)` com
+`noise = Hash3(pu, pv, block*8 + face) & 15`, `mul = 0.92f + noise*0.01f`; `ShadePixel` faz
+`px/py = clamp((i32)(u*16), 0, 15)`; `DrawBlockFace(x, y, z, face, i32 block)`; teste em `main.cpp`:
+linha de 3 cubos (grass, dirt, grass) + uma face de grama 8x8 em y = -1.
 

@@ -132,16 +132,173 @@ ScreenVert ProjectToScreen(v4 clip)
     return result;
 }
 
+// --- Near-plane clipping (step 9) ---
+// u and v are unused for now, but ClipPolygonNear must interpolate them so the UVs
+// survive the cut when step 11 starts painting blocks.
+struct ClipVert
+{
+    v4 pos;
+    f32 u;
+    f32 v;
+};
+
+v4 LerpV4(v4 a, v4 b, f32 t)
+{
+    return V4(Lerp(a.x, b.x, t), Lerp(a.y, b.y, t), Lerp(a.z, b.z, t), Lerp(a.w, b.w, t));
+}
+
+// Sutherland-Hodgman against the plane w = NEAR_W. A triangle comes out with at most 4 vertices.
+i32 ClipPolygonNear(ClipVert* in, i32 inCount, ClipVert* out)
+{
+    i32 outCount = 0;
+
+    for (i32 i = 0; i < inCount; ++i)
+    {
+        ClipVert cur = in[i];
+        ClipVert next = in[(i + 1) % inCount];
+
+        bool curInside = cur.pos.w >= NEAR_W;
+        bool nextInside = next.pos.w >= NEAR_W;
+
+        if (curInside)
+        {
+            out[outCount] = cur;
+            ++outCount;
+        }
+
+        if (curInside != nextInside)
+        {
+            // w changes linearly along the segment, so two vertices on opposite sides of the
+            // plane always have different w: the denominator is never zero here.
+            f32 t = (NEAR_W - cur.pos.w) / (next.pos.w - cur.pos.w);
+
+            ClipVert hit;
+            hit.pos = LerpV4(cur.pos, next.pos, t);
+            hit.pos.w = NEAR_W; // the cut vertex sits exactly on the near plane
+            hit.u = Lerp(cur.u, next.u, t);
+            hit.v = Lerp(cur.v, next.v, t);
+
+            out[outCount] = hit;
+            ++outCount;
+        }
+    }
+
+    return outCount;
+}
+
+void DrawClipTriangle(ClipVert a, ClipVert b, ClipVert c)
+{
+    ClipVert poly[3];
+    poly[0] = a;
+    poly[1] = b;
+    poly[2] = c;
+
+    ClipVert clipped[8];
+    i32 count = ClipPolygonNear(poly, 3, clipped);
+    if (count < 3) return;
+
+    // Near-plane clipping keeps the polygon convex, so a fan from vertex 0 covers it.
+    for (i32 k = 1; k <= count - 2; ++k)
+    {
+        ScreenVert screenA = ProjectToScreen(clipped[0].pos);
+        ScreenVert screenB = ProjectToScreen(clipped[k].pos);
+        ScreenVert screenC = ProjectToScreen(clipped[k + 1].pos);
+        RasterTriangle(screenA, screenB, screenC);
+    }
+}
+
 void DrawTriangle3D(v3 a, v3 b, v3 c, u32 color)
 {
-    v4 clipA = M4MulV4(GViewProj, V4(a.x, a.y, a.z, 1.0f));
-    v4 clipB = M4MulV4(GViewProj, V4(b.x, b.y, b.z, 1.0f));
-    v4 clipC = M4MulV4(GViewProj, V4(c.x, c.y, c.z, 1.0f));
+    ClipVert vertA;
+    vertA.pos = M4MulV4(GViewProj, V4(a.x, a.y, a.z, 1.0f));
+    vertA.u = 0.0f;
+    vertA.v = 0.0f;
 
-    // Any vertex behind the near plane rejects the whole triangle. Real clipping is step 9,
-    // so the test scene stays entirely in front of the camera.
-    if (clipA.w < NEAR_W || clipB.w < NEAR_W || clipC.w < NEAR_W) return;
+    ClipVert vertB;
+    vertB.pos = M4MulV4(GViewProj, V4(b.x, b.y, b.z, 1.0f));
+    vertB.u = 0.0f;
+    vertB.v = 0.0f;
+
+    ClipVert vertC;
+    vertC.pos = M4MulV4(GViewProj, V4(c.x, c.y, c.z, 1.0f));
+    vertC.u = 0.0f;
+    vertC.v = 0.0f;
 
     DS.FlatColor = color;
-    RasterTriangle(ProjectToScreen(clipA), ProjectToScreen(clipB), ProjectToScreen(clipC));
+    DrawClipTriangle(vertA, vertB, vertC);
+}
+
+// --- Block faces (step 10) ---
+// FaceCorner holds offsets from the block's min corner, so a block at (x, y, z) occupies
+// x..x+1, y..y+1, z..z+1. Winding matches RasterTriangle's counter-clockwise rule.
+const v3 FaceNormal[6] =
+{
+    { 1.0f, 0.0f, 0.0f },
+    { -1.0f, 0.0f, 0.0f },
+    { 0.0f, 1.0f, 0.0f },
+    { 0.0f, -1.0f, 0.0f },
+    { 0.0f, 0.0f, 1.0f },
+    { 0.0f, 0.0f, -1.0f }
+};
+
+const f32 FaceCorner[6][4][3] =
+{
+    { { 1.0f, 0.0f, 0.0f }, { 1.0f, 0.0f, 1.0f }, { 1.0f, 1.0f, 1.0f }, { 1.0f, 1.0f, 0.0f } },   // face 0 +X
+    { { 0.0f, 0.0f, 1.0f }, { 0.0f, 0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f }, { 0.0f, 1.0f, 1.0f } },   // face 1 -X
+    { { 0.0f, 1.0f, 0.0f }, { 1.0f, 1.0f, 0.0f }, { 1.0f, 1.0f, 1.0f }, { 0.0f, 1.0f, 1.0f } },   // face 2 +Y
+    { { 0.0f, 0.0f, 1.0f }, { 1.0f, 0.0f, 1.0f }, { 1.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 0.0f } },   // face 3 -Y
+    { { 1.0f, 0.0f, 1.0f }, { 0.0f, 0.0f, 1.0f }, { 0.0f, 1.0f, 1.0f }, { 1.0f, 1.0f, 1.0f } },   // face 4 +Z
+    { { 0.0f, 0.0f, 0.0f }, { 1.0f, 0.0f, 0.0f }, { 1.0f, 1.0f, 0.0f }, { 0.0f, 1.0f, 0.0f } }    // face 5 -Z
+};
+
+const f32 FaceShade[6] = { 0.8f, 0.8f, 1.0f, 0.5f, 0.65f, 0.65f };
+
+u32 ScaleColor(u32 color, f32 s)
+{
+    u32 r = (color >> 16) & 0xFFu;
+    u32 g = (color >> 8) & 0xFFu;
+    u32 b = color & 0xFFu;
+
+    // Each channel is scaled on its own and clamped, so a shade can never push a channel past 255.
+    i32 scaledR = i32(f32(r) * s);
+    i32 scaledG = i32(f32(g) * s);
+    i32 scaledB = i32(f32(b) * s);
+
+    return MakeColor(u8(MaxI(0, MinI(255, scaledR))), u8(MaxI(0, MinI(255, scaledG))), u8(MaxI(0, MinI(255, scaledB))));
+}
+
+void DrawQuad(v3 p0, v3 p1, v3 p2, v3 p3, u32 color)
+{
+    DrawTriangle3D(p0, p1, p2, color);
+    DrawTriangle3D(p0, p2, p3, color);
+}
+
+void DrawBlockFace(i32 x, i32 y, i32 z, i32 face, u32 baseColor)
+{
+    v3 normal = FaceNormal[face];
+
+    // The face centre sits half a unit out along the normal. A face only draws when the camera
+    // is on the side the normal points to, which is what keeps inside faces hidden.
+    v3 center = V3(f32(x) + 0.5f + 0.5f * normal.x,
+                   f32(y) + 0.5f + 0.5f * normal.y,
+                   f32(z) + 0.5f + 0.5f * normal.z);
+
+    if (V3Dot(normal, V3Sub(Cam.pos, center)) <= 0.0f) return;
+
+    u32 color = ScaleColor(baseColor, FaceShade[face]);
+
+    v3 corner0 = V3(f32(x) + FaceCorner[face][0][0], f32(y) + FaceCorner[face][0][1], f32(z) + FaceCorner[face][0][2]);
+    v3 corner1 = V3(f32(x) + FaceCorner[face][1][0], f32(y) + FaceCorner[face][1][1], f32(z) + FaceCorner[face][1][2]);
+    v3 corner2 = V3(f32(x) + FaceCorner[face][2][0], f32(y) + FaceCorner[face][2][1], f32(z) + FaceCorner[face][2][2]);
+    v3 corner3 = V3(f32(x) + FaceCorner[face][3][0], f32(y) + FaceCorner[face][3][1], f32(z) + FaceCorner[face][3][2]);
+
+    DrawQuad(corner0, corner1, corner2, corner3, color);
+}
+
+void DrawCube(i32 x, i32 y, i32 z, u32 color)
+{
+    for (i32 face = 0; face < 6; ++face)
+    {
+        DrawBlockFace(x, y, z, face, color);
+    }
 }
